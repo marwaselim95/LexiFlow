@@ -1,7 +1,7 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import { VaultWord } from '../services/api/types';
 import { getVaultMonths, getVaultWords, generateVaultParagraph as apiGenParagraph } from '../services/api/mockApi';
-import { removeWordThunk } from './wordsSlice';
+import { removeWordThunk, saveWordThunk } from './wordsSlice';
 
 interface VaultState {
   months: { month: string; wordCount: number }[];
@@ -57,6 +57,36 @@ const vaultSlice = createSlice({
   },
   extraReducers: builder => {
     builder
+      .addCase(saveWordThunk.fulfilled, (state, action) => {
+        const { word, source, wordId } = action.payload;
+        const savedAt = new Date().toISOString();
+        const monthKey = savedAt.slice(0, 7); // "YYYY-MM"
+
+        const vaultWord = {
+          id: wordId,
+          headword: word.headword,
+          nativeTranslation: word.nativeTranslation || word.synonyms[0] || '',
+          savedAt,
+          stage: word.stage,
+          cardData: { ...word, id: wordId, source, savedAt },
+        };
+
+        if (!state.wordsByMonth[monthKey]) {
+          state.wordsByMonth[monthKey] = [];
+        }
+        // Avoid duplicates (in case the month was already loaded)
+        if (!state.wordsByMonth[monthKey].some(w => w.id === wordId)) {
+          state.wordsByMonth[monthKey].push(vaultWord);
+        }
+
+        // Update months summary count
+        const existing = state.months.find(m => m.month === monthKey);
+        if (existing) {
+          existing.wordCount += 1;
+        } else {
+          state.months.push({ month: monthKey, wordCount: 1 });
+        }
+      })
       .addCase(removeWordThunk.fulfilled, (state, action) => {
         const id = action.payload;
         for (const month in state.wordsByMonth) {

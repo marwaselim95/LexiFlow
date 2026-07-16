@@ -30,11 +30,12 @@ serve(async (req) => {
       .eq("id", userId)
       .single();
 
-    // Fetch recent vault words as seeds
+    // Fetch recent vault words as seeds — filtered by active language
     const { data: vaultWords, error: vErr } = await supabase
       .from("words")
       .select("id, headword")
       .eq("user_id", userId)
+      .eq("target_language", profile?.target_language ?? "en")
       .order("saved_at", { ascending: false })
       .limit(SAMPLE_SIZE);
 

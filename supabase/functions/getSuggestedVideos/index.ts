@@ -59,8 +59,16 @@ serve(async (req) => {
 
     if (pErr || !profile) throw new Error("Profile not found");
 
-    const langCode   = profile.target_language === "fr" ? "fr" : "en";
-    const regionCode = profile.target_language === "fr" ? "FR" : "US";
+    const langCode   = profile.target_language;
+    // Map language code to YouTube region code for relevance hints.
+    // Covers all 24 supported languages; defaults to US for unmatched.
+    const REGION_MAP: Record<string, string> = {
+      ar: "SA", zh: "CN", nl: "NL", en: "US", fr: "FR", de: "DE",
+      el: "GR", he: "IL", hi: "IN", id: "ID", it: "IT", ja: "JP",
+      ko: "KR", fa: "IR", pl: "PL", pt: "BR", ro: "RO", ru: "RU",
+      es: "ES", sv: "SE", th: "TH", tr: "TR", uk: "UA", vi: "VN",
+    };
+    const regionCode = REGION_MAP[langCode] ?? "US";
 
     // ── EXPLICIT SEARCH PATH (query present) ──────────────────────────────
     // Bypasses cold-start gate — a user with 0 watch history can still search.
@@ -225,6 +233,6 @@ async function searchYouTube(
                ?? "",
     duration:     "",    // YouTube /search does not return duration; use "" as placeholder
     category:     normalizeCategory(query),
-    language:     lang as "en" | "fr",
+    language:     lang,
   }));
 }

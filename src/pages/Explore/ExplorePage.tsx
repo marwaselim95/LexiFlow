@@ -66,7 +66,6 @@ export default function ExplorePage() {
   const dispatch = useAppDispatch();
   const { cards, emptyMessage, searchQuery, searchResults, safetyError, loading, searchLoading, error } = useAppSelector(s => s.explore);
   const [inputValue, setInputValue] = useState('');
-  const [lang, setLang] = useState<'native' | 'target'>('target');
 
   useEffect(() => {
     dispatch(loadExploreSuggestions());
@@ -76,7 +75,7 @@ export default function ExplorePage() {
     e.preventDefault();
     if (!inputValue.trim()) return;
     dispatch(setSearchQuery(inputValue));
-    dispatch(searchExplore({ query: inputValue.trim(), lang }));
+    dispatch(searchExplore({ query: inputValue.trim(), lang: 'target' }));
   };
 
   const handleRefresh = () => {
@@ -110,48 +109,45 @@ export default function ExplorePage() {
         </div>
 
         {/* Search bar */}
-        <form onSubmit={handleSearch} className="flex flex-col gap-2">
-          <input
-            value={inputValue}
-            onChange={e => { setInputValue(e.target.value); if (!e.target.value) dispatch(clearSearch()); }}
-            placeholder="Search in any language…"
-            className="w-full px-4 py-3 rounded-full text-sm outline-none"
+        <form onSubmit={handleSearch}>
+          <div
+            className="flex items-center rounded-full"
             style={{
               backgroundColor: 'rgba(255,255,255,0.15)',
-              color: 'white',
               border: '2px solid rgba(255,255,255,0.3)',
-              fontFamily: 'Inter, sans-serif',
             }}
-          />
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setLang('target')}
-              className="flex-1 py-1.5 rounded-full text-xs font-medium transition-all"
-              style={{
-                backgroundColor: lang === 'target' ? 'white' : 'rgba(255,255,255,0.15)',
-                color: lang === 'target' ? '#153C70' : 'white',
-              }}
-            >
-              Target language
-            </button>
-            <button
-              type="button"
-              onClick={() => setLang('native')}
-              className="flex-1 py-1.5 rounded-full text-xs font-medium transition-all"
-              style={{
-                backgroundColor: lang === 'native' ? 'white' : 'rgba(255,255,255,0.15)',
-                color: lang === 'native' ? '#153C70' : 'white',
-              }}
-            >
-              Native language
-            </button>
+          >
             <button
               type="submit"
-              className="px-4 py-1.5 rounded-full text-xs font-semibold text-white bg-white/20 hover:bg-white/30"
+              aria-label="Search"
+              className="flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-full transition-colors hover:bg-white/10 focus:outline-none"
             >
-              Search
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="white"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                width="16"
+                height="16"
+                aria-hidden="true"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
             </button>
+            <input
+              value={inputValue}
+              onChange={e => { setInputValue(e.target.value); if (!e.target.value) dispatch(clearSearch()); }}
+              placeholder="Search in any language…"
+              className="flex-1 bg-transparent py-3 pr-4 text-sm outline-none"
+              style={{
+                color: 'white',
+                fontFamily: 'Inter, sans-serif',
+              }}
+            />
           </div>
         </form>
       </div>

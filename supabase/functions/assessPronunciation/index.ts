@@ -41,7 +41,15 @@ serve(async (req) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 30_000);
 
-    // SpeechSuper pronunciation scoring endpoint
+    // Map ISO 639-1 codes to SpeechSuper locale codes.
+    // Languages without dedicated SpeechSuper support fall back to en-US.
+    const SPEECHSUPER_LOCALE_MAP: Record<string, string> = {
+      ar: "ar-SA", zh: "zh-CN", nl: "nl-NL", en: "en-US", fr: "fr-FR", de: "de-DE",
+      el: "el-GR", he: "he-IL", hi: "hi-IN", id: "id-ID", it: "it-IT", ja: "ja-JP",
+      ko: "ko-KR", fa: "fa-IR", pl: "pl-PL", pt: "pt-BR", ro: "ro-RO", ru: "ru-RU",
+      es: "es-ES", sv: "sv-SE", th: "th-TH", tr: "tr-TR", uk: "uk-UA", vi: "vi-VN",
+    };
+
     const payload = {
       appKey: SPEECHSUPER_APP_KEY,
       request: {
@@ -49,7 +57,7 @@ serve(async (req) => {
         refText:    word,
         audioType:  "mp3",
         audioData:  audioB64,
-        language:   targetLang === "fr" ? "fr-FR" : "en-US",
+        language:   SPEECHSUPER_LOCALE_MAP[targetLang] ?? "en-US",
       },
     };
 

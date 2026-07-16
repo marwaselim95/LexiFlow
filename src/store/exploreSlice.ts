@@ -26,8 +26,8 @@ const initialState: ExploreState = {
 
 export const loadExploreSuggestions = createAsyncThunk(
   'explore/load',
-  async (forceRefresh?: boolean) => {
-    return await getExploreSuggestions(forceRefresh ?? false);
+  async (forceRefresh: boolean = false) => {
+    return await getExploreSuggestions(forceRefresh);
   }
 );
 

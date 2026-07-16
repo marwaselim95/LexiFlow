@@ -3,6 +3,7 @@ import { corsHeaders, corsResponse } from "../_shared/cors.ts";
 import { errorResponse } from "../_shared/errors.ts";
 import { callGemini, isSafetyBlock } from "../_shared/gemini.ts";
 import { getSupabaseClient, requireAuth } from "../_shared/supabase.ts";
+import { validateCardScripts } from "../_shared/textSanitize.ts";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return corsResponse();
@@ -88,6 +89,25 @@ Every field except nativeSynonyms must be written entirely in ${targetLang}. Do 
             card.active        = true;
             card.source        = "explore";
           }
+
+          // ── Script-contamination validation ────────────────────────────
+          if (card) {
+            const validation = validateCardScripts(
+              card, nativeLang, targetLang, "searchExplore"
+            );
+
+            if (validation.headwordContaminated) {
+              console.error(
+                `[searchExplore] Headword script-contaminated, dropping card. ` +
+                `headword="${card.headword}" targetLang="${targetLang}"`
+              );
+              return null; // drop this card entirely
+            }
+
+            card.synonyms = validation.filteredSynonyms;
+            card.contexts = validation.filteredContexts;
+          }
+
           return card;
         } catch (err) {
           if (isSafetyBlock(err)) return null; // skip unsafe individual words

@@ -21,11 +21,23 @@ serve(async (req) => {
       });
     }
 
+    // Fetch the user's active target language
+    const { data: profile, error: pErr } = await supabase
+      .from("profiles")
+      .select("target_language")
+      .eq("id", userId)
+      .single();
+
+    if (pErr || !profile) throw new Error("Profile not found");
+    const activeLanguage = profile.target_language;
+
     // Fetch up to DAILY_REVIEW_CAP due review items (include current_mcq for cache check)
+    // Filter by active language so users only see reviews for their current language.
     const { data: queueRows, error: qErr } = await supabase
       .from("review_queue")
       .select("id, word_id, question_type, scheduled_for, current_mcq")
       .eq("user_id", userId)
+      .eq("target_language", activeLanguage)
       .eq("status", "pending")
       .lte("scheduled_for", new Date().toISOString())
       .order("scheduled_for", { ascending: true })
@@ -188,13 +200,37 @@ async function generateQuestion(
     .map((c) => `[${c.label}] ${c.explanation} — "${c.example}"`)
     .join("\n");
 
+  // Pick a single random context explanation for type 2's definition
+  const randomContext = word.word_contexts.length > 0
+    ? word.word_contexts[Math.floor(Math.random() * word.word_contexts.length)]
+    : null;
+  const singleDefinition = randomContext
+    ? `[${randomContext.label}] ${randomContext.explanation}`
+    : word.headword;
+
   const prompts: Record<number, string> = {
     1: `Generate a multiple-choice question (4 options) testing knowledge of the word "${word.headword}".
-Context: ${contextsText}
+Here are all the word's context definitions (they are ALL correct meanings of this word):
+${contextsText}
+
+Instructions:
+- Pick exactly ONE of the context explanations above as the basis for the correct answer option.
+- Generate 3 plausible-but-incorrect distractor definitions that describe words DIFFERENT from "${word.headword}".
+- CRITICAL: Do NOT reuse or paraphrase ANY of the other context explanations listed above as a distractor, because they are also genuinely correct definitions of this same word and would create multiple right answers.
+- The "question" field should be: "Which definition is correct for '${word.headword}'?"
 Return JSON: { "question": string, "options": string[], "correctIndex": number }`,
 
-    2: `Generate a REVERSED multiple-choice question: give the definition/synonyms (${word.native_synonyms.join(", ")}) and ask the user to pick the correct word from 4 options.
-Word: "${word.headword}"
+    2: `Generate a REVERSED multiple-choice question. The user sees a definition and must pick the correct word from 4 options.
+
+Definition to show the user: "${singleDefinition}"
+Correct word: "${word.headword}"
+
+Instructions:
+- The "question" field must contain the definition shown above.
+- Exactly one of the 4 options MUST be "${word.headword}" (the correct answer).
+- The other 3 options must be real words that are clearly WRONG — they must NOT mean the same thing as the definition above.
+- Do not use any of these words as distractors since they are synonyms and would also be correct: ${word.native_synonyms.join(", ")}.
+- Make the distractors plausible (real words from the same language/domain) but clearly different in meaning.
 Return JSON: { "question": string, "options": string[], "correctIndex": number }`,
 
     3: `Generate a listen-and-write prompt for the word "${word.headword}". The user will hear the word and must type it.
@@ -213,5 +249,40 @@ Return JSON: { "instruction": string, "word": "${word.headword}" }`,
   };
 
   const raw    = await callGemini(prompts[questionType], { jsonMode: true });
-  return JSON.parse(raw);
+  const parsed = JSON.parse(raw);
+
+  // ── Defense-in-depth: validate generated options for types 1 & 2 ──
+  if (questionType === 1 && parsed.options && word.word_contexts.length > 1) {
+    const correctIdx = parsed.correctIndex as number;
+    const contextExplanations = word.word_contexts.map((c) => c.explanation.toLowerCase());
+    for (let i = 0; i < parsed.options.length; i++) {
+      if (i === correctIdx) continue;
+      const distractor = (parsed.options[i] as string).toLowerCase();
+      for (const ctx of contextExplanations) {
+        if (ctx.includes(distractor) || distractor.includes(ctx)) {
+          console.warn(
+            `[getMasterySession] Type 1 validation failed: distractor "${parsed.options[i]}" duplicates a context explanation for "${word.headword}". Falling back.`
+          );
+          throw new Error("Type 1 distractor matches an existing context explanation");
+        }
+      }
+    }
+  }
+
+  if (questionType === 2 && parsed.options && word.native_synonyms?.length > 0) {
+    const correctIdx = parsed.correctIndex as number;
+    const synonymsLower = word.native_synonyms.map((s) => s.toLowerCase());
+    for (let i = 0; i < parsed.options.length; i++) {
+      if (i === correctIdx) continue;
+      const distractor = (parsed.options[i] as string).toLowerCase();
+      if (synonymsLower.includes(distractor)) {
+        console.warn(
+          `[getMasterySession] Type 2 validation failed: distractor "${parsed.options[i]}" matches a native synonym of "${word.headword}". Falling back.`
+        );
+        throw new Error("Type 2 distractor matches a native synonym");
+      }
+    }
+  }
+
+  return parsed;
 }

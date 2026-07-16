@@ -29,6 +29,15 @@ serve(async (req) => {
       });
     }
 
+    // Fetch the user's active target language to tag this word
+    const { data: profile, error: pErr } = await supabase
+      .from("profiles")
+      .select("target_language")
+      .eq("id", userId)
+      .single();
+
+    if (pErr || !profile) throw new Error("Profile not found");
+
     // Insert into words
     const { data: wordRow, error: wordErr } = await supabase
       .from("words")
@@ -36,6 +45,7 @@ serve(async (req) => {
         user_id:         userId,
         headword:        word.headword,
         native_synonyms: nativeSynonyms,
+        target_language: profile.target_language,
         stage:           1,
         stage6_streak:   0,
         active:          true,

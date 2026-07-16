@@ -43,7 +43,7 @@ serve(async (req) => {
       .eq("id", userId)
       .single();
 
-    const lang = profile?.target_language === "fr" ? "fr" : "en";
+    const lang = profile?.target_language ?? "en";
 
     // ── Cache check ──────────────────────────────────────────────────────────
     const serviceClient = getServiceClient();

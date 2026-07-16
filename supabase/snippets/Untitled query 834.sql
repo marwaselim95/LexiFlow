@@ -1,0 +1,1 @@
+SELECT json_agg(t) FROM (SELECT trigger_name, event_manipulation, action_statement, action_orientation, action_timing FROM information_schema.triggers WHERE event_object_table = 'users' AND event_object_schema = 'auth') t;

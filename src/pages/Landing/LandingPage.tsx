@@ -1,12 +1,12 @@
 import { useState, useCallback } from 'react';
-import { motion, AnimatePresence, type Variants } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import Preloader from '../../components/Preloader/Preloader';
 import lexiLogoWhite from '../../assets/lexi_logo_white.svg';
 
-const contentVariants: Variants = {
+const contentVariants = {
   hidden: { opacity: 0, y: 20 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.8, ease: [0.76, 0, 0.24, 1] as const } },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.8, ease: [0.76, 0, 0.24, 1] } },
 };
 
 export default function LandingPage() {

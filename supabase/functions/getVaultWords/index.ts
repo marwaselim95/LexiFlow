@@ -25,10 +25,20 @@ serve(async (req) => {
     const nextMonth   = mon === 12 ? `${year + 1}-01` : `${year}-${String(mon + 1).padStart(2, "0")}`;
     const endDate     = `${nextMonth}-01T00:00:00.000Z`;
 
+    // Fetch the user's active target language
+    const { data: profile, error: pErr } = await supabase
+      .from("profiles")
+      .select("target_language")
+      .eq("id", userId)
+      .single();
+
+    if (pErr || !profile) throw new Error("Profile not found");
+
     const { data, error } = await supabase
       .from("words")
       .select("id, headword, native_synonyms, stage, active, saved_at, mastered_at, source, word_contexts(*)")
       .eq("user_id", userId)
+      .eq("target_language", profile.target_language)
       .gte("saved_at", startDate)
       .lt("saved_at", endDate)
       .order("saved_at", { ascending: false });

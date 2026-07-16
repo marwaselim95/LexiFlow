@@ -4,6 +4,7 @@ import { errorResponse } from "../_shared/errors.ts";
 import { callGemini } from "../_shared/gemini.ts";
 import { getSupabaseClient, requireAuth } from "../_shared/supabase.ts";
 import { checkRateLimit } from "../_shared/rateLimit.ts";
+import { validateCardScripts } from "../_shared/textSanitize.ts";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return corsResponse();
@@ -96,6 +97,26 @@ Return ONLY valid JSON, no markdown fences.`;
         card.nativeTranslation = card.translation;
         delete card.translation;
       }
+    }
+
+    // ── Script-contamination validation (post-processing, no retry) ──────
+    if (parsed.mode === "full" && parsed.card && typeof parsed.card === "object") {
+      const card = parsed.card as Record<string, unknown>;
+      const validation = validateCardScripts(card, nativeLang, targetLang, "generateDetailCard");
+
+      if (validation.headwordContaminated) {
+        console.error(
+          `[generateDetailCard] Headword script-contaminated, returning parse error. ` +
+          `headword="${card.headword}" targetLang="${targetLang}"`
+        );
+        return new Response(
+          JSON.stringify({ error: { type: "ai_error", message: "AI response could not be parsed. Please try again." } }),
+          { status: 502, headers: { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Content-Type": "application/json" } }
+        );
+      }
+
+      card.synonyms = validation.filteredSynonyms;
+      card.contexts = validation.filteredContexts;
     }
 
     return new Response(JSON.stringify(parsed), {

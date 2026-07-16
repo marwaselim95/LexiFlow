@@ -70,10 +70,10 @@ const wordsSlice = createSlice({
   extraReducers: builder => {
     builder
       .addCase(saveWordThunk.fulfilled, (state, action) => {
-        const { word, source } = action.payload;
-        const entry = { ...word, source, savedAt: new Date().toISOString() };
-        state.entities[word.id] = entry;
-        if (!state.ids.includes(word.id)) state.ids.push(word.id);
+        const { word, source, wordId } = action.payload;
+        const entry = { ...word, id: wordId, source, savedAt: new Date().toISOString() };
+        state.entities[wordId] = entry;
+        if (!state.ids.includes(wordId)) state.ids.push(wordId);
       })
       .addCase(removeWordThunk.fulfilled, (state, action) => {
         const id = action.payload;

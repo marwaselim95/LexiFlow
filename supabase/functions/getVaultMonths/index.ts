@@ -10,11 +10,22 @@ serve(async (req) => {
     const supabase = getSupabaseClient(req);
     const userId   = await requireAuth(supabase);
 
+    // Fetch the user's active target language
+    const { data: profile, error: pErr } = await supabase
+      .from("profiles")
+      .select("target_language")
+      .eq("id", userId)
+      .single();
+
+    if (pErr || !profile) throw new Error("Profile not found");
+
     // Group words by calendar month, return count per month
+    // Filter by active language so counts reflect the current language only.
     const { data, error } = await supabase
       .from("words")
       .select("saved_at")
       .eq("user_id", userId)
+      .eq("target_language", profile.target_language)
       .order("saved_at", { ascending: false });
 
     if (error) throw new Error(error.message);
