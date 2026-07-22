@@ -68,7 +68,7 @@ export default function ExplorePage() {
   const [inputValue, setInputValue] = useState('');
 
   useEffect(() => {
-    dispatch(loadExploreSuggestions());
+    dispatch(loadExploreSuggestions(false));
   }, [dispatch]);
 
   const handleSearch = (e: React.FormEvent) => {
