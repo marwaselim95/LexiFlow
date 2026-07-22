@@ -25,8 +25,23 @@ serve(async (req) => {
       .eq("id", userId)
       .single();
 
-    const targetLang = profile?.target_language ?? "en";
-    const nativeLang = profile?.native_language ?? "en";
+    const targetCode = profile?.target_language ?? "en";
+    const nativeCode = profile?.native_language ?? "en";
+
+    // Resolve ISO codes → full language names so prompts get "Arabic" not "ar"
+    // and validateCardScripts/deriveExpectedScript can map to the correct script.
+    const { data: langRows } = await supabase
+      .from("supported_languages")
+      .select("code, name")
+      .in("code", [nativeCode, targetCode]);
+
+    const codeToName: Record<string, string> = {};
+    if (langRows) {
+      for (const row of langRows) codeToName[row.code] = row.name;
+    }
+
+    const targetLang = codeToName[targetCode] ?? targetCode;
+    const nativeLang = codeToName[nativeCode] ?? nativeCode;
 
     // Step 1: get a cluster of related vocab items
     // NOTE: response_format:json_object requires a top-level object, not a bare array.

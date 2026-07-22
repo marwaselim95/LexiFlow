@@ -2,6 +2,7 @@ import React from 'react';
 import { useAppDispatch, useAppSelector } from '../../store';
 import { setMode } from '../../store/detailCardSlice';
 import { PronunciationRecorder } from '../PronunciationRecorder/PronunciationRecorder';
+import { codeToName } from '../../store/userSlice';
 
 export function DetailCardPronounceView() {
   const dispatch = useAppDispatch();
@@ -27,7 +28,8 @@ export function DetailCardPronounceView() {
       {card && (
         <PronunciationRecorder
           word={card.headword}
-          targetLang={targetLanguage}
+          // SpeechSuper API expects full language name, not ISO code
+          targetLang={codeToName(targetLanguage)}
         />
       )}
     </div>

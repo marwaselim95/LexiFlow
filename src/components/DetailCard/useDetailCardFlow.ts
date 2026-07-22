@@ -5,6 +5,7 @@ import {
   acceptCorrection, rejectCorrection, submitEdit,
 } from '../../store/detailCardSlice';
 import { generateDetailCard, checkTypos } from '../../services/api/mockApi';
+import { codeToName } from '../../store/userSlice';
 
 /**
  * useDetailCardFlow — orchestrates the complete DetailCard generation pipeline:
@@ -13,6 +14,8 @@ import { generateDetailCard, checkTypos } from '../../services/api/mockApi';
 export function useDetailCardFlow() {
   const dispatch = useAppDispatch();
   const { currentText, retryCount, originalText } = useAppSelector(s => s.detailCard);
+  // Store holds ISO codes; convert to full names at the API call boundary
+  // so AI prompts receive "English" not "en".
   const { nativeLanguage, targetLanguage } = useAppSelector(s => s.user);
 
   const runGeneration = useCallback(async (text: string) => {
@@ -32,7 +35,12 @@ export function useDetailCardFlow() {
       }
 
       // Generate card
-      const result = await generateDetailCard({ text, nativeLang: nativeLanguage, targetLang: targetLanguage });
+      // Generate card — convert ISO codes to full names for the AI prompt
+      const result = await generateDetailCard({
+        text,
+        nativeLang: codeToName(nativeLanguage),
+        targetLang: codeToName(targetLanguage),
+      });
       if (result.mode === 'too_long') {
         dispatch(setMode('too_long'));
       } else if (result.card) {

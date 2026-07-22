@@ -101,3 +101,13 @@ export type SearchExploreResult =
 export type GenerateVaultParagraphResult =
   | { paragraph: string; pickedWordIds: string[] }
   | { error: string };
+
+// ─── Language ─────────────────────────────────────────────────────────────────
+
+/** Shape returned by getLearningLanguages edge function per language entry. */
+export interface LearningLanguage {
+  code: string;       // ISO 639-1, e.g. 'en', 'fr', 'ar'
+  name: string;       // Display name, e.g. 'English'
+  addedAt: string;    // ISO timestamp
+  isActive: boolean;  // true for the currently active language
+}

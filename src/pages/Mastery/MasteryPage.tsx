@@ -161,7 +161,7 @@ export default function MasteryPage() {
             className="rounded-3xl p-5 shadow-sm"
             style={{ border: '2px solid #E2E8F0', backgroundColor: 'white' }}
           >
-            <DetailCardFull card={currentItem.cardData} standalone />
+            <DetailCardFull card={currentItem.cardData} standalone forceSaved />
           </div>
         </div>
       )}

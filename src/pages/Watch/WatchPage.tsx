@@ -93,9 +93,11 @@ function VideoCard({ video, first }: { video: VideoItem; first: boolean }) {
 export default function WatchPage() {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
-  const { suggestedVideos, promptMessage, videosLoading, urlValidating, urlError, error } = useAppSelector(s => s.watch);
-  const [searchValue, setSearchValue] = useState('');
-  const [hasSearched, setHasSearched] = useState(false);
+  const { suggestedVideos, promptMessage, videosLoading, urlValidating, urlError, error, lastSearchQuery } = useAppSelector(s => s.watch);
+  const [searchValue, setSearchValue] = useState(() => lastSearchQuery);
+  const [hasSearched, setHasSearched] = useState(
+    () => suggestedVideos.length > 0 || !!promptMessage || !!error
+  );
 
   // Auto-load on mount disabled — uncomment to re-enable personalised recommendations:
   // useEffect(() => {

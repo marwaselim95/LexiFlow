@@ -61,6 +61,15 @@ function IconPronounce({ size = 20 }: { size?: number }) {
   );
 }
 
+function IconSettings({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
+    </svg>
+  );
+}
+
 // ─── Nav Items ────────────────────────────────────────────────────────────────
 
 const NAV_ITEMS = [
@@ -411,7 +420,7 @@ export function BottomNav({ isOpen, onToggle }: SidebarProps) {
           </NavLink>
         ))}
       </div>
-      {/* ── Sign out ── */}
+      {/* ── Settings + Sign out ── */}
       <div
         style={{
           padding: navPad,
@@ -419,6 +428,47 @@ export function BottomNav({ isOpen, onToggle }: SidebarProps) {
           flexShrink: 0,
         }}
       >
+        {/* Settings button — same structure as sign-out, neutral hover colors */}
+        <button
+          onClick={() => navigate('/settings')}
+          aria-label="Settings"
+          title="Settings"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: navGap,
+            padding: navItemPad,
+            width: '100%',
+            justifyContent: 'flex-start',
+            borderRadius: 12,
+            border: 'none',
+            background: 'none',
+            cursor: 'pointer',
+            fontFamily: 'Poppins, sans-serif',
+            fontSize: navFontSize,
+            fontWeight: 500,
+            color: '#718096',
+            transition: 'all 0.18s ease',
+          }}
+          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = '#EEF2FA'; (e.currentTarget as HTMLButtonElement).style.color = '#153C70'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = '#718096'; }}
+        >
+          <span style={{ color: 'inherit', flexShrink: 0 }}>
+            <IconSettings size={iconSize} />
+          </span>
+          <span
+            style={{
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              opacity: isOpen ? 1 : 0,
+              maxWidth: isOpen ? 160 : 0,
+              transform: isOpen ? 'translateX(0)' : 'translateX(-8px)',
+              transition: 'opacity 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), max-width 0.38s cubic-bezier(0.25, 0.8, 0.25, 1), transform 0.38s cubic-bezier(0.25, 0.8, 0.25, 1)',
+            }}
+          >
+            Settings
+          </span>
+        </button>
         <button
           onClick={async () => {
             await dispatch(signOut());

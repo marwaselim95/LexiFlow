@@ -5,6 +5,7 @@ import { getSuggestedVideos, getVideoCaptions, validateVideoUrl as apiValidate }
 interface WatchState {
   suggestedVideos: VideoItem[];
   promptMessage: string | null;
+  lastSearchQuery: string;
   videosLoading: boolean;
   /** Tracks the requestId of the most-recently dispatched loadSuggestedVideos call.
    *  Fulfilled/rejected handlers for older in-flight requests are silently discarded. */
@@ -20,6 +21,7 @@ interface WatchState {
 const initialState: WatchState = {
   suggestedVideos: [],
   promptMessage: null,
+  lastSearchQuery: '',
   videosLoading: false,
   latestRequestId: null,
   captions: [],
@@ -64,6 +66,7 @@ const watchSlice = createSlice({
         state.error = null;
         // Stamp the latest request so stale responses can be identified and discarded.
         state.latestRequestId = action.meta.requestId;
+        state.lastSearchQuery = action.meta.arg ?? '';
       })
       .addCase(loadSuggestedVideos.fulfilled, (state, action) => {
         // Discard stale responses — only the most recently dispatched call wins.

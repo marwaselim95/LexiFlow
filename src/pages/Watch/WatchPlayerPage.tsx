@@ -26,6 +26,7 @@ function CaptionBox({
 }) {
   const dispatch = useAppDispatch();
   const { triggerCardOpen } = useDetailCardFlow();
+  const activeLineRef = useRef<HTMLParagraphElement | null>(null);
 
   const handleCaptionMouseUp = () => {
     const sel = window.getSelection();
@@ -36,6 +37,19 @@ function CaptionBox({
       dispatch(showBeeIcon({ text, x: rect.left + rect.width / 2, y: rect.top + window.scrollY - 8 }));
     }
   };
+
+    // Index of the caption line currently being spoken, or -1 if none is active.
+    const activeIndex = captions.findIndex(
+      line => currentTimeMs >= line.startMs && currentTimeMs <= line.endMs
+    );
+
+    // Auto-scroll the transcript so the active line stays in view as the video plays.
+    // "nearest" only scrolls the caption box's own internal scroll container when the
+    // line isn't already visible — it never scrolls the outer page.
+    useEffect(() => {
+      if (activeIndex === -1) return;
+      activeLineRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }, [activeIndex]);
 
   return (
     <div
@@ -66,6 +80,7 @@ function CaptionBox({
             return (
               <p
                 key={i}
+                ref={isActive ? activeLineRef : undefined}
                 className="text-sm transition-all leading-relaxed"
                 style={{
                   color: isActive ? '#1A202C' : '#718096',

@@ -10,6 +10,7 @@ import { DetailCardFull } from './DetailCardFull';
 import { DetailCardWatchView } from './DetailCardWatchView';
 import { DetailCardPronounceView } from './DetailCardPronounceView';
 import { useDetailCardFlow } from './useDetailCardFlow';
+import { codeToName } from '../../store/userSlice';
 
 interface Props {
   source?: 'watch' | 'explore' | 'selection' | 'manual';
@@ -55,7 +56,8 @@ export function DetailCard({ source = 'selection' }: Props) {
       case 'watch':
         return card ? <DetailCardWatchView
           card={card}
-          targetLanguage={targetLanguage}
+          // YouglishWidget.fetch(word, language) expects full name ("english", "french")
+          targetLanguage={codeToName(targetLanguage)}
           onBack={() => dispatch(setMode('full'))}
         /> : null;
       // PRONOUNCE — TEMPORARILY DISABLED (SpeechSuper integration paused)

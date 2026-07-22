@@ -16,6 +16,7 @@ import {
   GetExploreSuggestionsResult,
   SearchExploreResult,
   GenerateVaultParagraphResult,
+  LearningLanguage,
 } from './types';
 
 // ─── Error normalisation ──────────────────────────────────────────────────────
@@ -404,8 +405,17 @@ const STATIC_CARDS: DetailCardData[] = [
   }
 ];
 
-export async function getExploreSuggestions(forceRefresh = false): Promise<GetExploreSuggestionsResult> {
-  return withDevCache('getExploreSuggestions', {}, async () => {
+export async function getExploreSuggestions(
+  forceRefresh = false,
+  langContext?: { nativeLanguage: string; targetLanguage: string },
+): Promise<GetExploreSuggestionsResult> {
+  // Include language pair in the cache key so dev-cache differentiates across
+  // language changes. The actual edge function body is unchanged — it derives
+  // language from the user's server-side profile.
+  const cachePayload = langContext
+    ? { nativeLanguage: langContext.nativeLanguage, targetLanguage: langContext.targetLanguage }
+    : {};
+  return withDevCache('getExploreSuggestions', cachePayload, async () => {
     const { data, error } = await supabase.functions.invoke('getExploreSuggestions', { body: {} });
     if (error) invokeError(error);
     // Edge function returns { cards } or { emptyMessage }.
@@ -414,17 +424,23 @@ export async function getExploreSuggestions(forceRefresh = false): Promise<GetEx
 }
 
 
-export async function searchExplore(input: {
-  query: string;
-  lang: 'native' | 'target';
-}): Promise<SearchExploreResult> {
+export async function searchExplore(
+  input: { query: string; lang: 'native' | 'target' },
+  langContext?: { nativeLanguage: string; targetLanguage: string },
+): Promise<SearchExploreResult> {
   const queryStr = input.query.toLowerCase().trim();
   const match = STATIC_CARDS.find(c => c.headword === queryStr);
   if (match) {
     return { cards: [match] };
   }
 
-  return withDevCache('searchExplore', input, async () => {
+  // Include language pair in the cache key so dev-cache differentiates across
+  // language changes. The actual edge function body is unchanged — it derives
+  // language from the user's server-side profile.
+  const cachePayload = langContext
+    ? { ...input, nativeLanguage: langContext.nativeLanguage, targetLanguage: langContext.targetLanguage }
+    : input;
+  return withDevCache('searchExplore', cachePayload, async () => {
     const { data, error } = await supabase.functions.invoke('searchExplore', {
       body: { query: input.query, lang: input.lang },
     });
@@ -448,3 +464,55 @@ export async function getWordForPhoneme(phoneme: string): Promise<{ word: string
   if (error) invokeError(error);
   return data as { word: string };
 }
+
+// ─── Language management ──────────────────────────────────────────────────────
+
+/**
+ * Fetch the full list of languages the user is learning, plus which is active.
+ * Returns codes — the caller is responsible for code→name display conversion.
+ */
+export async function getLearningLanguages(): Promise<{
+  languages: LearningLanguage[];
+  activeLanguage: string | null;
+}> {
+  const { data, error } = await supabase.functions.invoke('getLearningLanguages', { body: {} });
+  if (error) invokeError(error);
+  return data as { languages: LearningLanguage[]; activeLanguage: string | null };
+}
+
+/**
+ * Add a new language (by ISO code) to the user's learning list.
+ * Idempotent — duplicate additions are silently ignored by the backend.
+ */
+export async function addLearningLanguage(language: string): Promise<{ success: true; language: string }> {
+  const { data, error } = await supabase.functions.invoke('addLearningLanguage', {
+    body: { language },
+  });
+  if (error) invokeError(error);
+  return data as { success: true; language: string };
+}
+
+/**
+ * Set a new active learning language (must already be in the user's list).
+ * Updates profiles.target_language server-side.
+ */
+export async function setActiveLanguage(language: string): Promise<{ success: true; activeLanguage: string }> {
+  const { data, error } = await supabase.functions.invoke('setActiveLanguage', {
+    body: { language },
+  });
+  if (error) invokeError(error);
+  return data as { success: true; activeLanguage: string };
+}
+
+/**
+ * Update the user's native language (by ISO code).
+ * Updates profiles.native_language server-side.
+ */
+export async function updateNativeLanguage(language: string): Promise<{ success: true; nativeLanguage: string }> {
+  const { data, error } = await supabase.functions.invoke('updateNativeLanguage', {
+    body: { language },
+  });
+  if (error) invokeError(error);
+  return data as { success: true; nativeLanguage: string };
+}
+

@@ -54,6 +54,12 @@ const vaultSlice = createSlice({
     resetReadSession(state) {
       state.currentReadSession = { paragraph: null, pickedWordIds: [], generating: false, error: null };
     },
+    /** Clears cached vault data so the next navigation to /vault re-fetches for the active language. */
+    resetVaultData(state) {
+      state.months = [];
+      state.wordsByMonth = {};
+      state.error = null;
+    },
   },
   extraReducers: builder => {
     builder
@@ -131,5 +137,5 @@ const vaultSlice = createSlice({
   },
 });
 
-export const { resetReadSession } = vaultSlice.actions;
+export const { resetReadSession, resetVaultData } = vaultSlice.actions;
 export default vaultSlice.reducer;

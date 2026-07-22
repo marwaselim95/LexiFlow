@@ -8,9 +8,17 @@ import { addSessionWord } from '../../store/watchSlice';
 interface Props {
   card: DetailCardData;
   source?: 'manual' | 'watch' | 'explore' | 'selection';
+  /**
+   * When true, the button always displays "✓ Saved" regardless of whether the
+   * Redux slices have loaded this word. The actualSavedWordId lookup still runs
+   * so the Remove confirmation flow can still find and delete the correct word.
+   * Only pass this from contexts where the word is guaranteed to be saved
+   * (e.g. MasteryPage, where all queued words are already in the words table).
+   */
+  forceSaved?: boolean;
 }
 
-export function SaveButton({ card, source = 'manual' }: Props) {
+export function SaveButton({ card, source = 'manual', forceSaved = false }: Props) {
   const dispatch = useAppDispatch();
   const wordsEntities = useAppSelector(s => s.words.entities);
   const vaultWordsByMonth = useAppSelector(s => s.vault.wordsByMonth);
@@ -31,7 +39,9 @@ export function SaveButton({ card, source = 'manual' }: Props) {
     return null;
   }, [wordsEntities, vaultWordsByMonth, card.id, card.headword]);
 
-  const isActuallySaved = !!actualSavedWordId;
+  // forceSaved short-circuits only the *displayed* state — the underlying
+  // actualSavedWordId lookup above still runs so Remove can find the real ID.
+  const isActuallySaved = forceSaved || !!actualSavedWordId;
   const [saving, setSaving] = useState(false);
   const [confirmVisible, setConfirmVisible] = useState(false);
 

@@ -1,18 +1,25 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppDispatch } from '../../store';
-import { completeOnboarding } from '../../store/userSlice';
-import { LANGUAGES, TARGET_LANGUAGES } from '../../store/userSlice';
+import { completeOnboarding, SUPPORTED_LANGUAGES } from '../../store/userSlice';
+import { updateNativeLanguage } from '../../services/api/mockApi';
 
 export default function OnboardingPage() {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
-  const [nativeLang, setNativeLang] = useState('Arabic');
-  const [targetLang, setTargetLang] = useState('English');
+  // Default values are ISO codes — matches what completeOnboarding now stores
+  const [nativeLang, setNativeLang] = useState('ar');
+  const [targetLang, setTargetLang] = useState('en');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     dispatch(completeOnboarding({ nativeLanguage: nativeLang, targetLanguage: targetLang }));
+    // Persist native language to profiles table so edge functions
+    // (getExploreSuggestions, searchExplore, etc.) read the correct value.
+    // Fire-and-forget — don't block navigation on the DB write.
+    updateNativeLanguage(nativeLang).catch((err) =>
+      console.error('[Onboarding] Failed to persist native language:', err)
+    );
     navigate('/mastery');
   };
 
@@ -74,8 +81,8 @@ export default function OnboardingPage() {
               backgroundColor: '#F4F7FB',
             }}
           >
-            {LANGUAGES.map(lang => (
-              <option key={lang} value={lang}>{lang}</option>
+            {SUPPORTED_LANGUAGES.map(lang => (
+              <option key={lang.code} value={lang.code}>{lang.name}</option>
             ))}
           </select>
         </div>
@@ -101,8 +108,8 @@ export default function OnboardingPage() {
               backgroundColor: '#F4F7FB',
             }}
           >
-            {TARGET_LANGUAGES.map(lang => (
-              <option key={lang} value={lang}>{lang}</option>
+            {SUPPORTED_LANGUAGES.map(lang => (
+              <option key={lang.code} value={lang.code}>{lang.name}</option>
             ))}
           </select>
         </div>

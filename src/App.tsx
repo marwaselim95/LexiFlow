@@ -19,6 +19,7 @@ import ExplorePage from './pages/Explore/ExplorePage';
 import PronouncePage from './pages/Pronounce/PronouncePage';
 import LandingPage from './pages/Landing/LandingPage';
 import PhonemeAssessmentPage from './pages/Pronounce/PhonemeAssessmentPage';
+import SettingsPage from './pages/Settings/SettingsPage';
 
 // ─── Session Loader ───────────────────────────────────────────────────────────
 // Dispatches restoreSession on first render and shows a full-screen spinner
@@ -143,6 +144,10 @@ export default function App() {
             <Route
               path="/explore"
               element={<RequireAuth><ExplorePage /></RequireAuth>}
+            />
+            <Route
+              path="/settings"
+              element={<RequireAuth><SettingsPage /></RequireAuth>}
             />
             {/* PRONOUNCE — TEMPORARILY DISABLED (SpeechSuper integration paused)
             Re-enable by restoring the two Route entries below and the nav item in BottomNav.tsx

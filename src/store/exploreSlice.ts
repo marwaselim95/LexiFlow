@@ -1,6 +1,7 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { DetailCardData } from '../services/api/types';
 import { getExploreSuggestions, searchExplore as apiSearch } from '../services/api/mockApi';
+import type { RootState } from './index';
 
 interface ExploreState {
   cards: DetailCardData[];
@@ -26,15 +27,17 @@ const initialState: ExploreState = {
 
 export const loadExploreSuggestions = createAsyncThunk(
   'explore/load',
-  async (forceRefresh: boolean = false) => {
-    return await getExploreSuggestions(forceRefresh);
+  async (forceRefresh: boolean = false, thunkAPI) => {
+    const { nativeLanguage, targetLanguage } = (thunkAPI.getState() as RootState).user;
+    return await getExploreSuggestions(forceRefresh, { nativeLanguage, targetLanguage });
   }
 );
 
 export const searchExplore = createAsyncThunk(
   'explore/search',
-  async (input: { query: string; lang: 'native' | 'target' }) => {
-    return await apiSearch(input);
+  async (input: { query: string; lang: 'native' | 'target' }, thunkAPI) => {
+    const { nativeLanguage, targetLanguage } = (thunkAPI.getState() as RootState).user;
+    return await apiSearch(input, { nativeLanguage, targetLanguage });
   }
 );
 
