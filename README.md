@@ -1,6 +1,11 @@
 # LexiFlow
 
-A neuro-based language learning PWA built with React, Redux Toolkit, Tailwind CSS, and React Router.
+A neuro-based language learning PWA — master vocabulary through spaced repetition, immersive YouTube-based watching, AI-generated vocabulary cards, and contextual example-driven learning.
+
+Built with React, Redux Toolkit, Tailwind CSS, React Router, and Supabase (Auth, Postgres, Edge Functions).
+
+
+---
 
 ## Quick Start
 
@@ -11,89 +16,146 @@ npm run dev
 
 Then open http://localhost:5173.
 
----
+### Environment Variables
 
-## Backend Integration Points
+Create a `.env.local` file in the project root:
 
-All data flows through `/src/services/api/mockApi.ts` and `/src/services/api/auth.ts`. To connect the real Supabase/edge-function backend, replace **each function body** with the real implementation. Function signatures **must not change** — the entire component tree depends on them.
+```
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your-anon-key
+```
 
-### Authentication (`/src/services/api/auth.ts` → Supabase Auth JS client)
+Supabase Edge Functions additionally require their own secrets (Gemini/Groq API key, YouTube Data API key, SpeechSuper credentials, etc.) configured via `supabase secrets set` or the Supabase dashboard — see **Backend / Edge Functions** below.
 
-| Function | Description | Real implementation |
-|---|---|---|
-| `signUp` | Create a new user account | `supabase.auth.signUp({ email, password })` |
-| `signIn` | Sign an existing user in | `supabase.auth.signInWithPassword({ email, password })` |
-| `signOut` | End the current session | `supabase.auth.signOut()` |
-| `requestPasswordReset` | Send a password reset email | `supabase.auth.resetPasswordForEmail(email, { redirectTo })` |
-| `confirmPasswordReset` | Set new password from reset token | `supabase.auth.updateUser({ password })` |
-| `restoreSession` | Rehydrate an existing session on app load | `supabase.auth.getSession()` |
+### Scripts
 
-### App Data (`/src/services/api/mockApi.ts` → Supabase edge functions)
-
-| Function | Description | Backend target |
-|---|---|---|
-| `generateDetailCard` | Generate full/simplified/too_long card from text | Gemini edge function |
-| `checkTypos` | Spell-check input text | Gemini edge function |
-| `translateExplanations` | Translate context explanations to native language | Gemini edge function |
-| `assessPronunciation` | Assess recorded audio against a target word | SpeechSuper API via Supabase function |
-| `saveWord` | Persist a word to user's vault | Supabase insert (words table) |
-| `removeWord` | Remove a word from user's vault | Supabase delete |
-| `getMasterySession` | Get today's SRS review queue (cap: 50) | Supabase SRS query |
-| `submitAnswer` | Submit review answer and update SRS stage | Supabase SRS update |
-| `getVaultMonths` | Get list of months with saved word counts | Supabase aggregation query |
-| `getVaultWords` | Get all words saved in a given month | Supabase query |
-| `generateVaultParagraph` | Generate a paragraph using month's saved words | Gemini edge function |
-| `getSuggestedVideos` | Get personalized video recommendations | Recommendation engine / Supabase function |
-| `validateVideoUrl` | Check if a YouTube URL is in target language | YouTube Data API |
-| `getVideoCaptions` | Fetch captions/subtitles for a YouTube video | YouTube Captions API |
-| `getExploreSuggestions` | Get AI-suggested vocabulary cards | Gemini edge function |
-| `searchExplore` | Search vocabulary by text in native/target language | Gemini edge function |
-| `getPhonemeList` | Get list of target-language phonemes with status | Supabase query |
-| `getWordForPhoneme` | Get a word containing a specific phoneme for practice | Supabase/Gemini lookup |
+| Command | Description |
+|---|---|
+| `npm run dev` | Start local dev server |
+| `npm run build` | Type-check and build for production |
+| `npm run preview` | Preview the production build locally |
+| `npm run lint` | Run ESLint |
 
 ---
 
-## Architecture
+## Features
+
+### 🐝 Word Lookup (Bee Icon + DetailCard)
+Select any text anywhere in the app to trigger an AI-generated vocabulary card: definitions across multiple contexts, native-language synonyms, example sentences, pronunciation (via YouGlish), and one-tap saving. Handles typo correction, overly-long selections, and multi-word phrases gracefully.
+
+### 🧠 Mastery (Spaced Repetition)
+A daily review queue driven by a 6-stage SRS algorithm (Postgres RPC-based scheduling). Six question types: multiple choice, reversed multiple choice, listen-and-write, fill-in-the-blanks, nuanced usage, and open production — the latter two graded by AI.
+
+### 📚 Vault
+Saved words organized by month. Includes a "Read" mode that generates an AI paragraph using that month's saved vocabulary, with saved words highlighted and tappable for review.
+
+### 📺 Watch
+Search for or paste a YouTube video in your target language. Captions are scraped/cached server-side (InnerTube API with watch-page-scraping fallback) and displayed alongside the video, synced to playback. Select any caption text to look it up instantly.
+
+### 🧭 Explore
+AI-suggested vocabulary based on your saved words, plus free-text search in either your native or target language that returns a cluster of related vocabulary cards.
+
+### 🎤 Pronounce *(currently disabled)*
+Phoneme-level pronunciation assessment via SpeechSuper. Temporarily paused — see `THRESHOLDS.md` and inline `PRONOUNCE — TEMPORARILY DISABLED` comments in the codebase for re-enabling instructions.
+
+### 🌍 Multi-Language Support
+Users can learn multiple target languages, switch the active one from Settings, and add new languages on the fly. 24 supported languages (see `supabase/migrations/009_multi_language_support.sql`).
+
+### 🔐 Auth
+Full email/password flow via Supabase Auth: sign up, log in, forgot/reset password, session persistence and restoration.
+
+### 📱 PWA
+Installable as a standalone app via `vite-plugin-pwa`, with offline asset caching.
+
+---
+
+## Project Structure
 
 ```
 src/
-  services/api/
-    types.ts          ← All shared TypeScript interfaces (DetailCardData, ReviewItem, etc.)
-    mockApi.ts        ← 19 mock implementations (REPLACE these with real calls)
-  store/
-    index.ts          ← Redux store configuration
-    userSlice.ts      ← nativeLanguage, targetLanguage, onboarded
-    wordsSlice.ts     ← Normalized word dictionary
-    detailCardSlice.ts← DetailCard UI state machine
-    masterySessionSlice.ts ← SRS review session
-    vaultSlice.ts     ← Vault months + words + read session
-    watchSlice.ts     ← Video suggestions + captions + session words
-    exploreSlice.ts   ← Explore feed + search
-    pronounceSlice.ts ← Phoneme list + assessment flow
-    uiSlice.ts        ← Bee icon + toasts + add-word FAB
   components/
-    layout/           ← AppShell, BottomNav
-    common/           ← BeeIcon, Toast, LoadingSpinner, EmptyState
-    DetailCard/       ← Full DetailCard component tree (8 sub-states)
-    PronunciationRecorder/ ← Web Audio API mic recorder
-    YouTubePlayer/    ← Real YouTube IFrame API integration
-  pages/              ← One folder per section
-  hooks/
-    useApiCall.ts     ← Standardized async state hook
-    useTextSelection.ts ← Global text selection → bee icon
+    DetailCard/       ← Word lookup card (8 sub-states: loading, editing, full, watch view, etc.)
+    PronunciationRecorder/  ← Web Audio API mic recorder (currently unused — Pronounce disabled)
+    YouTubePlayer/     ← Custom YouTube IFrame API player with synced captions
+    layout/            ← AppShell, collapsible sidebar nav
+    common/            ← Toast, LoadingSpinner, EmptyState, BeeIcon
+  pages/               ← One folder per app section (Auth, Mastery, Vault, Watch, Explore, Settings, Onboarding, Landing)
+  store/               ← Redux Toolkit slices (auth, user, words, detailCard, mastery, vault, watch, explore, ui)
+  services/api/
+    types.ts           ← Shared TypeScript interfaces
+    mockApi.ts         ← Live Supabase client wrappers (despite the name — fully wired to production)
+    auth.ts             ← Supabase Auth wrappers
+  hooks/               ← useApiCall, useTextSelection
+
+supabase/
+  functions/           ← Edge Functions (Deno) — one folder per function, plus _shared/ utilities
+  migrations/          ← Sequential SQL migrations (schema, RPCs, multi-language support, etc.)
 ```
+
+---
+
+## Backend / Edge Functions
+
+All AI and third-party integrations run server-side as Supabase Edge Functions (Deno), never exposing API keys to the client.
+
+| Function | Purpose |
+|---|---|
+| `generateDetailCard` | Generate a full/simplified vocabulary card from selected text |
+| `checkTypos` | Spell-check before card generation |
+| `translateExplanations` | Translate context explanations into the user's native language |
+| `saveWord` / `removeWord` | Vault CRUD |
+| `getMasterySession` / `submitAnswer` | SRS review queue + answer grading (with AI-graded question types) |
+| `getVaultMonths` / `getVaultWords` / `generateVaultParagraph` | Vault browsing and AI reading-paragraph generation |
+| `getSuggestedVideos` / `validateVideoUrl` / `getVideoCaptions` | YouTube search, validation, and caption scraping/caching |
+| `getExploreSuggestions` / `searchExplore` | AI vocabulary discovery |
+| `getPhonemeList` / `getWordForPhoneme` / `assessPronunciation` | Pronounce feature (currently disabled) |
+| `getLearningLanguages` / `addLearningLanguage` / `setActiveLanguage` / `updateNativeLanguage` | Multi-language management |
+| `backfillCategories` | One-time maintenance script for watch-history category normalization |
+
+Shared utilities (`supabase/functions/_shared/`) handle CORS, error normalization, rate limiting, the AI provider client (Groq primary, OpenRouter fallback), Levenshtein-based typo tolerance, and script-contamination detection for AI output.
+
+AI provider: **Groq** (`llama-3.3-70b-versatile`) is primary; falls back to OpenRouter if configured. See `supabase/functions/_shared/gemini.ts` (name is legacy — no longer Gemini-specific).
+
+Full endpoint-by-endpoint behavior and tunable constants (rate limits, typo tolerance thresholds, cold-start thresholds, etc.) are documented in `THRESHOLDS.md`.
+
+---
+
+## Database
+
+Postgres schema, RLS policies, and SRS scheduling logic live in `supabase/migrations/`, applied sequentially. Key pieces:
+
+- `profiles`, `words`, `word_contexts`, `review_queue`, `review_history` — core learning data, all RLS-scoped to `auth.uid()`
+- `schedule_review()` / `on_answer()` — transactional Postgres RPCs driving the spaced-repetition state machine
+- `supported_languages` / `user_languages` — multi-language support (added in migration 009)
+- `video_captions` — server-side caption cache (service-role only)
+- A trigger on `auth.users` auto-provisions `profiles` and `user_languages` on signup
+
+---
+
+## Deployment
+
+- **Frontend**: Deployed on Vercel, auto-deploying from the `main` branch of this GitHub repo. Every PR gets an automatic preview deployment link via Vercel's GitHub integration.
+- **Backend**: Supabase project hosts the Postgres database and all Edge Functions (deployed via `supabase functions deploy`).
+
+---
 
 ## Design System
 
-See `design.md` for full token reference. All CSS variables are in `src/index.css`.
+See `design.md` for the full token reference (colors, typography, spacing, border-radius scale). Implemented as CSS custom properties in `src/index.css`.
 
 - Primary Blue: `#153C70`
-- Font: Poppins (headings) + Inter (body)
-- Cards: 16–24px border radius
-- Buttons: pill-shaped (9999px)
-# Team members
+- Fonts: Poppins (headings) · Inter (body)
+- Cards: 16–24px border radius · Buttons: pill-shaped
 
-Lead Technical Architect: Marwa Ahmed Mohamed Selim
-Presentation and feasilbity report: Noor Ayman Mohamed
-QA and Testing: Aisha Mahmoud Abdelwareth
-Market analysis and GTM: Shahd Medhat Arafagit push -u nha-repo main
+---
+
+
+## Ownership & Access
+
+This project — the GitHub repository, Supabase project, and Vercel deployment — is owned and administered by Marwa Ahmed Mohamed Selim. Infrastructure, billing, and admin access are kept under this single account across all three platforms.
+
+---
+
+## Team
+
+- **Lead Technical Architect**: Marwa Ahmed Mohamed Selim
