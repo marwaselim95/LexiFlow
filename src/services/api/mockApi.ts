@@ -1,8 +1,8 @@
 // ─── Live Service Layer ───────────────────────────────────────────────────────
-// All functions call the real Supabase backend (DB or edge functions).
+// All functions call the NestJS backend (REST + JWT).
 // Exported signatures are frozen — the entire UI depends on them exactly.
 
-import { supabase } from '../../lib/supabase';
+import { apiFetch } from '../../lib/api';
 import {
   DetailCardData,
   ReviewItem,
@@ -19,18 +19,8 @@ import {
   LearningLanguage,
 } from './types';
 
-// ─── Error normalisation ──────────────────────────────────────────────────────
-// Every component/hook that consumes these functions expects errors to be thrown
-// as plain Error objects (the Redux thunks catch them and store message strings).
-// For edge function calls, map the top-level `error` from functions.invoke into
-// a thrown Error so error boundaries see a consistent surface.
-
-function invokeError(err: { message: string } | null | undefined): never {
-  throw new Error(err?.message ?? 'An unknown error occurred.');
-}
-
 // ─── Dev-only caching ─────────────────────────────────────────────────────────
-// Caches AI edge function responses in memory during development to save quota.
+// Caches AI endpoint responses in memory during development to save quota.
 // This is entirely bypassed in production builds.
 
 const isDev = import.meta.env.DEV;
@@ -41,7 +31,7 @@ if (isDev) {
   window.clearDevCache = () => {
     devCache.clear();
     console.log('[dev-cache] Cache cleared.');
-  };
+  }
 }
 
 /**
@@ -79,18 +69,11 @@ export async function generateDetailCard(input: {
   targetLang: string;
 }): Promise<GenerateDetailCardResult> {
   return withDevCache('generateDetailCard', input, async () => {
-    const { data, error } = await supabase.functions.invoke('generateDetailCard', {
-      body: { text: input.text, nativeLang: input.nativeLang, targetLang: input.targetLang },
+    const data = await apiFetch<{ mode: string; card?: any }>('/detail-card', {
+      method: 'POST',
+      body: JSON.stringify({ text: input.text, nativeLang: input.nativeLang, targetLang: input.targetLang }),
     });
-    if (error) invokeError(error);
 
-    // Edge function may return { error: { type, message } } with a 2xx-ish status in some edge cases.
-    // Guard against this so we don't crash on data.card access below.
-    if (data?.error) {
-      throw new Error(data.error.message ?? 'AI provider error');
-    }
-
-    // Edge function returns { mode, card } — shape matches GenerateDetailCardResult exactly.
     // Card from the backend may be missing SRS fields (stage, stage6_streak, active) —
     // supply defaults so the frontend type is fully satisfied.
     if (data.card) {
@@ -112,11 +95,10 @@ export async function checkTypos(input: { text: string }): Promise<{
   suggestion?: string;
 }> {
   return withDevCache('checkTypos', input, async () => {
-    const { data, error } = await supabase.functions.invoke('checkTypos', {
-      body: { text: input.text },
+    return apiFetch<{ hasTypos: boolean; suggestion?: string }>('/typos', {
+      method: 'POST',
+      body: JSON.stringify({ text: input.text }),
     });
-    if (error) invokeError(error);
-    return data as { hasTypos: boolean; suggestion?: string };
   });
 }
 
@@ -125,75 +107,50 @@ export async function translateExplanations(input: {
   nativeLang: string;
 }): Promise<{ translated: string[] }> {
   return withDevCache('translateExplanations', input, async () => {
-    const { data, error } = await supabase.functions.invoke('translateExplanations', {
-      body: { explanations: input.explanations, nativeLang: input.nativeLang },
+    return apiFetch<{ translated: string[] }>('/explanations/translate', {
+      method: 'POST',
+      body: JSON.stringify({ explanations: input.explanations, nativeLang: input.nativeLang }),
     });
-    if (error) invokeError(error);
-    return data as { translated: string[] };
   });
 }
-
-// getYouglishVideo removed — YouGlish is now rendered client-side via the YouGlish JS widget.
 
 export async function assessPronunciation(input: {
   audioBlob: Blob;
   word: string;
   targetLang: string;
 }): Promise<PronunciationResult> {
-  // The edge function reads req.formData() — must send as FormData, not JSON.
   const form = new FormData();
   form.append('audio', input.audioBlob, 'recording.mp3');
   form.append('word', input.word);
   form.append('targetLang', input.targetLang);
 
-  const { data: { session } } = await supabase.auth.getSession();
-  const jwt = session?.access_token;
-
-  // functions.invoke does not support FormData bodies directly, so use fetch.
-  const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/assessPronunciation`;
-  const res = await fetch(url, {
+  return apiFetch<PronunciationResult>('/pronunciation/assess', {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${jwt}`,
-      apikey: import.meta.env.VITE_SUPABASE_ANON_KEY as string,
-    },
     body: form,
   });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body?.error?.message ?? `assessPronunciation HTTP ${res.status}`);
-  }
-
-  return res.json() as Promise<PronunciationResult>;
 }
 
 export async function saveWord(input: {
   word: DetailCardData;
   source: 'manual' | 'watch' | 'explore' | 'selection';
 }): Promise<{ wordId: string }> {
-  const { data, error } = await supabase.functions.invoke('saveWord', {
-    body: { word: input.word, source: input.source },
+  return apiFetch<{ wordId: string }>('/words', {
+    method: 'POST',
+    body: JSON.stringify({ word: input.word, source: input.source }),
   });
-  if (error) invokeError(error);
-  return data as { wordId: string };
 }
 
 export async function removeWord(input: { wordId: string }): Promise<{ success: boolean }> {
-  const { data, error } = await supabase.functions.invoke('removeWord', {
-    body: { wordId: input.wordId },
+  return apiFetch<{ success: boolean }>(`/words/${encodeURIComponent(input.wordId)}`, {
+    method: 'DELETE',
   });
-  if (error) invokeError(error);
-  return data as { success: boolean };
 }
 
 export async function getMasterySession(): Promise<{
   queue: ReviewItem[];
   totalToday: number;
 }> {
-  const { data, error } = await supabase.functions.invoke('getMasterySession', { body: {} });
-  if (error) invokeError(error);
-  return data as { queue: ReviewItem[]; totalToday: number };
+  return apiFetch<{ queue: ReviewItem[]; totalToday: number }>('/mastery/session');
 }
 
 export async function submitAnswer(input: {
@@ -202,32 +159,25 @@ export async function submitAnswer(input: {
   userAnswer: string;
   questionType: number;
 }): Promise<{ isCorrect: boolean; newStage: number }> {
-  const { data, error } = await supabase.functions.invoke('submitAnswer', {
-    body: {
+  return apiFetch<{ isCorrect: boolean; newStage: number }>('/mastery/submit', {
+    method: 'POST',
+    body: JSON.stringify({
       wordId: input.wordId,
       reviewId: input.reviewId,
       userAnswer: input.userAnswer,
       questionType: input.questionType,
-    },
+    }),
   });
-  if (error) invokeError(error);
-  return data as { isCorrect: boolean; newStage: number };
 }
 
 export async function getVaultMonths(): Promise<{ month: string; wordCount: number }[]> {
-  const { data, error } = await supabase.functions.invoke('getVaultMonths', { body: {} });
-  if (error) invokeError(error);
-  // Edge function returns an array directly (not wrapped in an object).
-  return data as { month: string; wordCount: number }[];
+  // Backend returns an array directly (not wrapped in an object).
+  return apiFetch<{ month: string; wordCount: number }[]>('/words/vault/months');
 }
 
 export async function getVaultWords(month: string): Promise<VaultWord[]> {
-  const { data, error } = await supabase.functions.invoke('getVaultWords', {
-    body: { month },
-  });
-  if (error) invokeError(error);
-  // Edge function returns the VaultWord array directly.
-  return data as VaultWord[];
+  // Backend returns the VaultWord array directly.
+  return apiFetch<VaultWord[]>(`/words/vault/words?month=${encodeURIComponent(month)}`);
 }
 
 export async function generateVaultParagraph(input: {
@@ -235,65 +185,50 @@ export async function generateVaultParagraph(input: {
   excludeWordIds: string[];
 }): Promise<GenerateVaultParagraphResult> {
   return withDevCache('generateVaultParagraph', input, async () => {
-    const { data, error } = await supabase.functions.invoke('generateVaultParagraph', {
-      body: { month: input.month, excludeWordIds: input.excludeWordIds },
+    return apiFetch<GenerateVaultParagraphResult>('/words/vault/paragraph', {
+      method: 'POST',
+      body: JSON.stringify({ month: input.month, excludeWordIds: input.excludeWordIds }),
     });
-    if (error) invokeError(error);
-    // Edge function returns { paragraph, pickedWordIds } or { error: string }.
-    return data as GenerateVaultParagraphResult;
   });
 }
 
 export async function getSuggestedVideos(query?: string): Promise<GetSuggestedVideosResult> {
-  const body: Record<string, unknown> = {};
-  if (query) body.query = query;
-  const { data, error } = await supabase.functions.invoke('getSuggestedVideos', { body });
-  if (error) invokeError(error);
   // targetLanguage is read from the user's profile server-side — no need to pass it.
-  // The edge function now hard-filters on defaultAudioLanguage matching the profile lang.
-  return data as GetSuggestedVideosResult;
+  return apiFetch<GetSuggestedVideosResult>('/videos/suggested', {
+    method: 'POST',
+    body: JSON.stringify(query ? { query } : {}),
+  });
 }
 
 export async function validateVideoUrl(input: { url: string }): Promise<{
   valid: boolean;
   reason?: string;
 }> {
-  const { data, error } = await supabase.functions.invoke('validateVideoUrl', {
-    // targetLanguage is read from the user's profile server-side by the edge function.
-    body: { url: input.url },
+  return apiFetch<{ valid: boolean; reason?: string }>('/videos/validate', {
+    method: 'POST',
+    body: JSON.stringify({ url: input.url }),
   });
-  if (error) invokeError(error);
-  return data as { valid: boolean; reason?: string };
 }
 
 export async function getVideoCaptions(videoId: string): Promise<{ captions: CaptionLine[] }> {
-  const { data, error } = await supabase.functions.invoke('getVideoCaptions', {
-    body: { videoId },
-  });
-  if (error) invokeError(error);
-  return data as { captions: CaptionLine[] };
+  return apiFetch<{ captions: CaptionLine[] }>(`/videos/captions?videoId=${encodeURIComponent(videoId)}`);
 }
 
 /**
- * Record a video watch in watch_history.
- * Direct Supabase insert — fire-and-forget so it never blocks the player.
- * RLS ensures only the authenticated user's own rows can be written.
+ * Record a video watch in watch history.
+ * Fire-and-forget so it never blocks the player; failures are logged only.
  */
 export async function recordWatchHistory(
   videoId: string,
   categories: string[] = [],
 ): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return; // silently skip if not authenticated
-
-  const { error } = await supabase.from('watch_history').insert({
-    user_id: user.id,
-    video_id: videoId,
-    categories,
-  });
-
-  if (error) {
-    console.warn('[watch-history] Insert failed:', error.message);
+  try {
+    await apiFetch('/watch/history', {
+      method: 'POST',
+      body: JSON.stringify({ videoId, categories }),
+    });
+  } catch (err) {
+    console.warn('[watch-history] Insert failed:', (err as Error).message);
   }
 }
 
@@ -410,16 +345,13 @@ export async function getExploreSuggestions(
   langContext?: { nativeLanguage: string; targetLanguage: string },
 ): Promise<GetExploreSuggestionsResult> {
   // Include language pair in the cache key so dev-cache differentiates across
-  // language changes. The actual edge function body is unchanged — it derives
-  // language from the user's server-side profile.
+  // language changes. The backend derives language from the user's profile.
   const cachePayload = langContext
     ? { nativeLanguage: langContext.nativeLanguage, targetLanguage: langContext.targetLanguage }
     : {};
   return withDevCache('getExploreSuggestions', cachePayload, async () => {
-    const { data, error } = await supabase.functions.invoke('getExploreSuggestions', { body: {} });
-    if (error) invokeError(error);
-    // Edge function returns { cards } or { emptyMessage }.
-    return data as GetExploreSuggestionsResult;
+    // Backend returns { cards } or { emptyMessage }.
+    return apiFetch<GetExploreSuggestionsResult>('/explore/suggestions');
   }, forceRefresh);
 }
 
@@ -434,50 +366,37 @@ export async function searchExplore(
     return { cards: [match] };
   }
 
-  // Include language pair in the cache key so dev-cache differentiates across
-  // language changes. The actual edge function body is unchanged — it derives
-  // language from the user's server-side profile.
   const cachePayload = langContext
     ? { ...input, nativeLanguage: langContext.nativeLanguage, targetLanguage: langContext.targetLanguage }
     : input;
   return withDevCache('searchExplore', cachePayload, async () => {
-    const { data, error } = await supabase.functions.invoke('searchExplore', {
-      body: { query: input.query, lang: input.lang },
+    // Backend returns { cards } or { safetyError: true }.
+    return apiFetch<SearchExploreResult>('/explore/search', {
+      method: 'POST',
+      body: JSON.stringify({ query: input.query, lang: input.lang }),
     });
-    if (error) invokeError(error);
-    // Edge function returns { cards } or { safetyError: true }.
-    return data as SearchExploreResult;
   });
 }
 
 export async function getPhonemeList(): Promise<PhonemeStatus[]> {
-  const { data, error } = await supabase.functions.invoke('getPhonemeList', { body: {} });
-  if (error) invokeError(error);
-  // Edge function returns the PhonemeStatus array directly.
-  return data as PhonemeStatus[];
+  // Backend returns the PhonemeStatus array directly.
+  return apiFetch<PhonemeStatus[]>('/phonemes');
 }
 
 export async function getWordForPhoneme(phoneme: string): Promise<{ word: string }> {
-  const { data, error } = await supabase.functions.invoke('getWordForPhoneme', {
-    body: { phoneme },
-  });
-  if (error) invokeError(error);
-  return data as { word: string };
+  return apiFetch<{ word: string }>(`/phonemes/word?phoneme=${encodeURIComponent(phoneme)}`);
 }
 
 // ─── Language management ──────────────────────────────────────────────────────
 
 /**
  * Fetch the full list of languages the user is learning, plus which is active.
- * Returns codes — the caller is responsible for code→name display conversion.
  */
 export async function getLearningLanguages(): Promise<{
   languages: LearningLanguage[];
   activeLanguage: string | null;
 }> {
-  const { data, error } = await supabase.functions.invoke('getLearningLanguages', { body: {} });
-  if (error) invokeError(error);
-  return data as { languages: LearningLanguage[]; activeLanguage: string | null };
+  return apiFetch<{ languages: LearningLanguage[]; activeLanguage: string | null }>('/languages');
 }
 
 /**
@@ -485,34 +404,28 @@ export async function getLearningLanguages(): Promise<{
  * Idempotent — duplicate additions are silently ignored by the backend.
  */
 export async function addLearningLanguage(language: string): Promise<{ success: true; language: string }> {
-  const { data, error } = await supabase.functions.invoke('addLearningLanguage', {
-    body: { language },
+  return apiFetch<{ success: true; language: string }>('/languages', {
+    method: 'POST',
+    body: JSON.stringify({ language }),
   });
-  if (error) invokeError(error);
-  return data as { success: true; language: string };
 }
 
 /**
  * Set a new active learning language (must already be in the user's list).
- * Updates profiles.target_language server-side.
  */
 export async function setActiveLanguage(language: string): Promise<{ success: true; activeLanguage: string }> {
-  const { data, error } = await supabase.functions.invoke('setActiveLanguage', {
-    body: { language },
+  return apiFetch<{ success: true; activeLanguage: string }>('/languages/active', {
+    method: 'POST',
+    body: JSON.stringify({ language }),
   });
-  if (error) invokeError(error);
-  return data as { success: true; activeLanguage: string };
 }
 
 /**
  * Update the user's native language (by ISO code).
- * Updates profiles.native_language server-side.
  */
 export async function updateNativeLanguage(language: string): Promise<{ success: true; nativeLanguage: string }> {
-  const { data, error } = await supabase.functions.invoke('updateNativeLanguage', {
-    body: { language },
+  return apiFetch<{ success: true; nativeLanguage: string }>('/languages/native', {
+    method: 'POST',
+    body: JSON.stringify({ language }),
   });
-  if (error) invokeError(error);
-  return data as { success: true; nativeLanguage: string };
 }
-

@@ -1,7 +1,7 @@
 // ─── Auth Service Layer ───────────────────────────────────────────────────────
-// Real Supabase Auth implementation. Signatures are frozen — authSlice depends on them.
+// NestJS JWT auth implementation. Signatures are frozen — authSlice depends on them.
 
-import { supabase } from '../../lib/supabase';
+import { apiFetch, ApiError, setToken, getToken, decodeJwtPayload } from '../../lib/api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,47 +25,47 @@ export type PasswordResetResult =
 // ─── Service Functions ────────────────────────────────────────────────────────
 
 export async function signUp(input: { email: string; password: string }): Promise<SignUpResult> {
-  const { data, error } = await supabase.auth.signUp({
-    email: input.email,
-    password: input.password,
-  });
-  if (error) {
-    if (error.message.toLowerCase().includes('already registered') ||
-        error.message.toLowerCase().includes('already been registered')) {
-      return { error: { type: 'email_taken', message: 'An account with this email already exists.' } };
-    }
-    if (error.message.toLowerCase().includes('password')) {
-      return { error: { type: 'weak_password', message: error.message } };
-    }
-    return { error: { type: 'unknown', message: error.message } };
+  try {
+    const data = await apiFetch<{ userId: string; token: string }>('/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      skipAuth: true,
+    });
+    setToken(data.token);
+    return { userId: data.userId };
+  } catch (err) {
+    return { error: classifyAuthError(err) };
   }
-  return { userId: data.user!.id };
 }
 
 export async function signIn(input: { email: string; password: string }): Promise<SignInResult> {
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email: input.email,
-    password: input.password,
-  });
-  if (error) {
-    if (error.message.toLowerCase().includes('invalid') ||
-        error.message.toLowerCase().includes('credentials')) {
+  try {
+    const data = await apiFetch<{ userId: string; email: string; token: string }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      skipAuth: true,
+    });
+    setToken(data.token);
+    return { userId: data.userId, email: data.email };
+  } catch (err) {
+    if (err instanceof ApiError && err.errorType === 'invalid_credentials') {
       return { error: { type: 'invalid_credentials', message: 'Email or password is incorrect.' } };
     }
-    return { error: { type: 'unknown', message: error.message } };
+    return { error: { type: 'unknown', message: (err as Error).message } };
   }
-  return { userId: data.user.id, email: data.user.email! };
 }
 
 export async function signOut(): Promise<{ success: boolean }> {
-  await supabase.auth.signOut();
+  setToken(null);
   return { success: true };
 }
 
 export async function requestPasswordReset(_input: { email: string }): Promise<{ success: boolean }> {
   // Always returns success — must not reveal whether the email exists.
-  await supabase.auth.resetPasswordForEmail(_input.email, {
-    redirectTo: `${window.location.origin}/reset-password`,
+  await apiFetch('/auth/request-reset', {
+    method: 'POST',
+    body: JSON.stringify(_input),
+    skipAuth: true,
   });
   return { success: true };
 }
@@ -74,25 +74,56 @@ export async function confirmPasswordReset(input: {
   token: string;
   newPassword: string;
 }): Promise<{ success: true } | PasswordResetResult> {
-  // After the user clicks the reset link, Supabase establishes a session automatically.
-  // We call updateUser to set the new password within that session.
-  // The `token` param is unused here (Supabase handles it via the URL hash on landing).
-  const { error } = await supabase.auth.updateUser({ password: input.newPassword });
-  if (error) {
-    if (error.message.toLowerCase().includes('expired') ||
-        error.message.toLowerCase().includes('invalid')) {
+  try {
+    await apiFetch('/auth/reset', {
+      method: 'POST',
+      body: JSON.stringify(input),
+      skipAuth: true,
+    });
+    return { success: true };
+  } catch (err) {
+    if (err instanceof ApiError && err.errorType === 'expired_token') {
       return { error: { type: 'expired_token', message: 'This reset link has expired. Please request a new one.' } };
     }
-    if (error.message.toLowerCase().includes('password')) {
-      return { error: { type: 'weak_password', message: error.message } };
+    if (err instanceof ApiError && err.errorType === 'weak_password') {
+      return { error: { type: 'weak_password', message: err.message } };
     }
-    return { error: { type: 'unknown', message: error.message } };
+    return { error: { type: 'unknown', message: (err as Error).message } };
   }
-  return { success: true };
 }
 
 export async function restoreSession(): Promise<AuthUser | null> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user) return null;
-  return { id: session.user.id, email: session.user.email! };
+  // Restore from the persisted JWT. Payload decoded locally; the token is
+  // re-validated server-side on every API call anyway.
+  const token = getToken();
+  if (!token) return null;
+
+  const payload = decodeJwtPayload(token);
+  if (!payload || typeof payload.sub !== 'string') {
+    setToken(null);
+    return null;
+  }
+
+  const exp = typeof payload.exp === 'number' ? payload.exp : null;
+  if (exp !== null && exp * 1000 <= Date.now()) {
+    setToken(null);
+    return null;
+  }
+
+  return { id: payload.sub, email: String(payload.email ?? '') };
+}
+
+function classifyAuthError(err: unknown): { type: 'email_taken' | 'weak_password' | 'unknown'; message: string } {
+  if (!(err instanceof Error)) {
+    return { type: 'unknown', message: 'An unknown error occurred.' };
+  }
+  const msg = err.message;
+  const lower = msg.toLowerCase();
+  if (lower.includes('already exists') || lower.includes('already registered')) {
+    return { type: 'email_taken', message: 'An account with this email already exists.' };
+  }
+  if (lower.includes('password')) {
+    return { type: 'weak_password', message: msg };
+  }
+  return { type: 'unknown', message: msg };
 }

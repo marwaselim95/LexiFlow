@@ -1,0 +1,2 @@
+[errorResponse] GET /api/auth/me unknown Unauthorized
+[errorResponse] POST /api/mastery/submit unknown Missing required fields

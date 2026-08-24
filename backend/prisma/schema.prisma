@@ -1,0 +1,226 @@
+// LexiFlow Prisma schema
+// Derived from supabase/migrations 001–010 with auth.users replaced
+// by a first-class users table (custom NestJS JWT auth).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  profile            Profile?
+  userLanguages      UserLanguage[]
+  words              Word[]
+  reviewQueueItems   ReviewQueue[]
+  reviewHistoryRows  ReviewHistory[]
+  watchHistoryRows   WatchHistory[]
+  watchSessionWords  WatchSessionWord[]
+  phonemeAssessments PhonemeAssessment[]
+
+  @@map("users")
+}
+
+model Profile {
+  id             String   @id @db.Uuid
+  nativeLanguage String   @map("native_language")
+  targetLanguage String   @map("target_language")
+  onboarded      Boolean  @default(false)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [id], references: [id], onDelete: Cascade)
+
+  @@map("profiles")
+}
+
+// ─── Reference data ───────────────────────────────────────────────────────────
+
+model SupportedLanguage {
+  code String @id
+  name String @unique
+
+  userLanguages     UserLanguage[]
+  words             Word[]
+  reviewQueueItems  ReviewQueue[]
+
+  @@map("supported_languages")
+}
+
+model UserLanguage {
+  userId   String   @map("user_id") @db.Uuid
+  language String
+  addedAt  DateTime @default(now()) @map("added_at")
+
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  supported SupportedLanguage @relation(fields: [language], references: [code])
+
+  @@id([userId, language])
+  @@map("user_languages")
+}
+
+model PhonemeReference {
+  id       String  @id @default(uuid()) @db.Uuid
+  language String
+  phoneme  String
+  label    String?
+
+  @@unique([language, phoneme])
+  @@map("phoneme_reference")
+}
+
+model PhonemeExampleWord {
+  id       String @id @default(uuid()) @db.Uuid
+  language String
+  phoneme  String
+  word     String
+
+  @@unique([language, phoneme])
+  @@map("phoneme_example_words")
+}
+
+// ─── Vocabulary / SRS ─────────────────────────────────────────────────────────
+
+model Word {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  headword       String
+  nativeSynonyms String[]  @map("native_synonyms")
+  stage          Int       @default(1)
+  stage6Streak   Int       @default(0) @map("stage6_streak")
+  active         Boolean   @default(true)
+  source         String
+  savedAt        DateTime  @default(now()) @map("saved_at")
+  masteredAt     DateTime? @map("mastered_at")
+  targetLanguage String    @map("target_language")
+
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  supported         SupportedLanguage @relation(fields: [targetLanguage], references: [code])
+  contexts          WordContext[]
+  reviewQueueItems  ReviewQueue[]
+  reviewHistoryRows ReviewHistory[]
+  watchSessionWords WatchSessionWord[]
+
+  @@index([userId, savedAt])
+  @@index([userId, active])
+  @@index([userId, targetLanguage])
+  @@map("words")
+}
+
+model WordContext {
+  id          String @id @default(uuid()) @db.Uuid
+  wordId      String @map("word_id") @db.Uuid
+  label       String
+  explanation String
+  example     String
+  sortOrder   Int    @default(0) @map("sort_order")
+
+  word Word @relation(fields: [wordId], references: [id], onDelete: Cascade)
+
+  @@map("word_contexts")
+}
+
+model ReviewQueue {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  wordId         String   @map("word_id") @db.Uuid
+  scheduledFor   DateTime @map("scheduled_for")
+  questionType   Int      @map("question_type")
+  status         String   @default("pending")
+  createdAt      DateTime @default(now()) @map("created_at")
+  currentMcq     Json?    @map("current_mcq")
+  targetLanguage String   @map("target_language")
+
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  word             Word             @relation(fields: [wordId], references: [id], onDelete: Cascade)
+  supported        SupportedLanguage @relation(fields: [targetLanguage], references: [code])
+  historyRows      ReviewHistory[]
+
+  @@index([userId, status, scheduledFor])
+  @@index([userId, targetLanguage, status, scheduledFor])
+  @@map("review_queue")
+}
+
+model ReviewHistory {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  wordId      String   @map("word_id") @db.Uuid
+  reviewId    String?  @map("review_id") @db.Uuid
+  isCorrect   Boolean  @map("is_correct")
+  stageBefore Int      @map("stage_before")
+  stageAfter  Int      @map("stage_after")
+  answeredAt  DateTime @default(now()) @map("answered_at")
+
+  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  word    Word         @relation(fields: [wordId], references: [id], onDelete: Cascade)
+  review  ReviewQueue? @relation(fields: [reviewId], references: [id])
+
+  @@map("review_history")
+}
+
+// ─── Watch ────────────────────────────────────────────────────────────────────
+
+model WatchHistory {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  videoId   String   @map("video_id")
+  categories String[]
+  watchedAt DateTime @default(now()) @map("watched_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, watchedAt])
+  @@map("watch_history")
+}
+
+model WatchSessionWord {
+  id      String   @id @default(uuid()) @db.Uuid
+  userId  String   @map("user_id") @db.Uuid
+  videoId String   @map("video_id")
+  wordId  String   @map("word_id") @db.Uuid
+  savedAt DateTime @default(now()) @map("saved_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  word Word @relation(fields: [wordId], references: [id], onDelete: Cascade)
+
+  @@map("watch_session_words")
+}
+
+// ─── Pronunciation ────────────────────────────────────────────────────────────
+
+model PhonemeAssessment {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  targetLanguage String   @map("target_language")
+  phoneme        String
+  status         String
+  attempts       Int      @default(0)
+  lastAssessedAt DateTime @default(now()) @map("last_assessed_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, targetLanguage, phoneme])
+  @@map("phoneme_assessments")
+}
+
+// ─── Video captions cache ─────────────────────────────────────────────────────
+
+model VideoCaption {
+  id        String   @id @default(uuid()) @db.Uuid
+  videoId   String   @map("video_id")
+  language  String
+  captions  Json
+  fetchedAt DateTime @default(now()) @map("fetched_at")
+
+  @@unique([videoId, language])
+  @@map("video_captions")
+}
