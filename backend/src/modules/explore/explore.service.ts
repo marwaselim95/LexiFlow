@@ -1,14 +1,11 @@
-import { HttpException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 
 import { PrismaService } from '../prisma/prisma.module';
 import { AiService } from '../ai/ai.service';
 import { UsersService } from '../users/users.service';
+import { error } from '../utils/http-error.util';
 import { validateCardScripts } from '../utils/text-sanitize.util';
-
-function error(type: string, message: string, status: number): HttpException {
-  return new HttpException({ error: { type, message } }, status);
-}
 
 const SAMPLE_SIZE = 20;
 const SEED_COUNT = 3;

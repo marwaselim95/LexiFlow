@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  HttpException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -9,11 +8,8 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 
 import { PrismaService } from '../prisma/prisma.module';
+import { error } from '../utils/http-error.util';
 import { SignUpDto, LoginDto } from './dto/login.dto';
-
-function error(type: string, message: string, status: number): HttpException {
-  return new HttpException({ error: { type, message } }, status);
-}
 
 @Injectable()
 export class AuthService {

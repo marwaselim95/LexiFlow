@@ -1,10 +1,7 @@
-import { HttpException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.module';
-
-function error(type: string, message: string, status: number): HttpException {
-  return new HttpException({ error: { type, message } }, status);
-}
+import { error } from '../utils/http-error.util';
 
 @Injectable()
 export class UsersService {
@@ -16,7 +13,7 @@ export class UsersService {
     if (!profile || !profile.targetLanguage) throw error('unknown', 'Profile not found', 404);
     return profile.targetLanguage;
   }
-
+  
   async getProfile(userId: string) {
     const profile = await this.prisma.profile.findUnique({ where: { id: userId } });
     if (!profile) throw error('unknown', 'Profile not found', 404);

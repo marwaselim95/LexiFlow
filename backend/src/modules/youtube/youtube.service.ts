@@ -1,33 +1,17 @@
 import { Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.module';
-import { normalizeCategory, CANONICAL_CATEGORIES } from '../utils/normalize-category.util';
+import { normalizeCategory } from '../utils/normalize-category.util';
+import { fetchWithTimeout } from './utils/fetch-with-timeout.util';
+import { BROWSER_UA, CaptionTrack, fetchTracksViaInnerTube, INNERTUBE_UA, scrapeTracksFromWatchPage } from './utils/innertube.util';
+import { CaptionLine, parseTranscriptXml } from './utils/transcript-parser.util';
+import { extractVideoId as extractVideoIdFromUrl, fetchAudioLanguages } from './utils/video-api.util';
 
 // Port of supabase/functions/getVideoCaptions + the YouTube Data API logic
 // from getSuggestedVideos / validateVideoUrl.
 
+// Cache Configuration
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
-
-// InnerTube API (Android client) — primary caption source.
-const INNERTUBE_API_URL = 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false';
-const INNERTUBE_CLIENT_VERSION = '20.10.38';
-const INNERTUBE_UA = `com.google.android.youtube/${INNERTUBE_CLIENT_VERSION} (Linux; U; Android 14)`;
-
-const BROWSER_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-  '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36,gzip(gfe)';
-
-export interface CaptionLine {
-  startMs: number;
-  endMs: number;
-  text: string;
-}
-
-interface CaptionTrack {
-  baseUrl: string;
-  languageCode: string;
-  kind: string; // "asr" for auto-generated, "" for manual
-}
 
 @Injectable()
 export class YoutubeService {
@@ -44,8 +28,11 @@ export class YoutubeService {
     const cached = await this.prisma.videoCaption.findUnique({
       where: { videoId_language: { videoId, language: lang } },
     });
+    // If the cached captions exist and are still valid (not expired), return them.
     if (cached) {
+      // Check if the cached captions are still valid based on the defined TTL (time-to-live).
       const age = Date.now() - new Date(cached.fetchedAt).getTime();
+      // If it's valid return the cached captions, otherwise proceed to fetch new captions.
       if (age < CACHE_TTL_MS) {
         console.log(
           `[CAPTION_CACHE_HIT] video=${videoId} lang=${lang} age_days=${(age / 86400000).toFixed(1)}`,
@@ -55,35 +42,45 @@ export class YoutubeService {
     }
 
     // Step 1: discover caption tracks
-    let captionTracks: CaptionTrack[];
-    let source: string;
+    let captionTracks: CaptionTrack[]; // Array to hold the discovered caption tracks for the video.
+    let source: string; // Variable to indicate the source of the caption tracks (either "innertube" or "watchpage").
     try {
-      const innerTubeResult = await this.fetchTracksViaInnerTube(videoId);
+      // First, attempt to fetch caption tracks using the InnerTube API. If that fails or returns no tracks, fall back to scraping the watch page for caption tracks.
+      const innerTubeResult = await fetchTracksViaInnerTube();
+
+      // If InnerTube API returns caption tracks, use them; otherwise, scrape the watch page for caption tracks.
       if (innerTubeResult && innerTubeResult.length > 0) {
-        captionTracks = innerTubeResult;
-        source = 'innertube';
+        captionTracks = innerTubeResult; // Using them here
+        source = 'innertube'; // Putting the source as innertube
       } else {
-        captionTracks = await this.scrapeTracksFromWatchPage(videoId);
+        // Here we scarpe
+        captionTracks = await scrapeTracksFromWatchPage(videoId);
         source = 'watchpage';
       }
+      // If everything fails we catch the error and log it, returning an empty captions array.
     } catch (err) {
       console.error(`[CAPTION_SCRAPE_FAILED] video=${videoId} stage=track_discovery error=${(err as Error).message}`);
       return { captions: [] };
     }
 
+    // Step 2: handle no tracks found (it didn't fail but returned no tracks)
     if (captionTracks.length === 0) {
       console.log(`[CAPTION_NONE] video=${videoId} — no caption tracks found`);
       return { captions: [] };
     }
 
     // Step 2: choose best track
-    const chosen =
-      captionTracks.find((t) => t.languageCode.startsWith(lang) && t.kind !== 'asr') ??
-      captionTracks.find((t) => t.languageCode.startsWith(lang)) ??
-      captionTracks[0];
 
+    // Getting the choosen one is by getting the one with the right language and if it is not auto generated, if not we get the one with the right language and if it is auto generated, if not we get the first one.
+    const chosen =
+      captionTracks.find((t) => t.languageCode.startsWith(lang) && t.kind !== 'asr') ?? // Right langauge + not auto generated
+      captionTracks.find((t) => t.languageCode.startsWith(lang)) ?? // Right langauge
+      captionTracks[0]; // Just anything atp
+
+    // The selected caption Track is logged for debugging purposes, including its language code, kind (manual or auto-generated), and source (InnerTube API or watch page scraping).
     console.log(`[CAPTION_TRACK_SELECTED] video=${videoId} lang=${chosen.languageCode} kind=${chosen.kind || 'manual'} source=${source}`);
 
+    // If the chosen track has no baseUrl, log an error and return an empty captions array. The baseUrl is necessary to fetch the actual caption content.
     if (!chosen.baseUrl) {
       console.error(`[CAPTION_SCRAPE_FAILED] video=${videoId} stage=track_selection error=selected track has no baseUrl`);
       return { captions: [] };
@@ -92,22 +89,28 @@ export class YoutubeService {
     // Step 3: fetch caption content
     let captions: CaptionLine[];
     try {
-      const captionRes = await this.fetchWithTimeout(chosen.baseUrl, 15_000, {
+
+      // Get the caption content from the chosen track's baseUrl.
+      // The fetchWithTimeout method is used to make the HTTP request with a timeout, and the appropriate User-Agent header is set based on the source of the caption tracks (InnerTube API or watch page scraping).
+      const captionRes = await fetchWithTimeout(chosen.baseUrl, 15_000, {
         'User-Agent': source === 'innertube' ? INNERTUBE_UA : BROWSER_UA,
       });
 
+      // If the captionRes wasn't ok (HTTP status not in the 200-299 range), log an error and return an empty captions array. This indicates that the request to fetch the caption content failed.
       if (!captionRes.ok) {
         console.error(`[CAPTION_SCRAPE_FAILED] video=${videoId} stage=caption_fetch error=HTTP ${captionRes.status}`);
         return { captions: [] };
       }
 
+      // Read the response body as text. If the response body is empty, log an error and return an empty captions array. This indicates that the caption content could not be retrieved successfully.
       const responseText = await captionRes.text();
       if (!responseText || responseText.length === 0) {
         console.error(`[CAPTION_SCRAPE_FAILED] video=${videoId} stage=caption_fetch error=empty response body (source=${source})`);
         return { captions: [] };
       }
 
-      captions = this.parseTranscriptXml(responseText);
+      // Parse the caption content (XML) into an array of CaptionLine objects. If no captions are parsed, log an error and return an empty captions array. This indicates that the caption content could not be interpreted successfully.
+      captions = parseTranscriptXml(responseText);
       if (captions.length === 0) {
         console.error(`[CAPTION_SCRAPE_FAILED] video=${videoId} stage=caption_parse error=no captions parsed from ${responseText.length} bytes`);
         return { captions: [] };
@@ -119,10 +122,11 @@ export class YoutubeService {
 
     // Step 4: write cache (non-fatal on failure)
     try {
+      // Upsert the fetched captions into the database cache. If the upsert operation fails, log an error but do not throw an exception, allowing the function to return the fetched captions even if caching fails.
       await this.prisma.videoCaption.upsert({
-        where: { videoId_language: { videoId, language: lang } },
-        update: { captions: captions as any, fetchedAt: new Date() },
-        create: { videoId, language: lang, captions: captions as any },
+        where: { videoId_language: { videoId, language: lang } }, // The unique constraint for the upsert operation is based on the combination of videoId and language. This ensures that each video-language pair has a single entry in the cache.
+        update: { captions: captions as any, fetchedAt: new Date() }, // If an entry already exists for the video-language pair, update the captions and the fetchedAt timestamp to reflect the new data.
+        create: { videoId, language: lang, captions: captions as any }, // If no entry exists for the video-language pair, create a new entry with the provided videoId, language, and captions.
       });
       console.log(`[CAPTION_CACHE_WRITE] video=${videoId} lang=${lang} lines=${captions.length}`);
     } catch (err) {
@@ -130,134 +134,6 @@ export class YoutubeService {
     }
 
     return { captions };
-  }
-
-  private async fetchWithTimeout(url: string, timeoutMs: number, headers?: Record<string, string>): Promise<Response> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      return await fetch(url, { signal: controller.signal, headers });
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  private async fetchTracksViaInnerTube(videoId: string): Promise<CaptionTrack[]> {
-    const res = await this.fetchWithTimeout(INNERTUBE_API_URL, 10_000, {
-      'Content-Type': 'application/json',
-      'User-Agent': INNERTUBE_UA,
-    });
-    if (!res.ok) return [];
-
-    const data: any = await res.json();
-    const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-    if (!Array.isArray(tracks) || tracks.length === 0) return [];
-
-    return tracks.map((t: Record<string, unknown>) => ({
-      baseUrl: (t.baseUrl as string) ?? '',
-      languageCode: (t.languageCode as string) ?? '',
-      kind: (t.kind as string) ?? '',
-    }));
-  }
-
-  private async scrapeTracksFromWatchPage(videoId: string): Promise<CaptionTrack[]> {
-    const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    const res = await this.fetchWithTimeout(watchUrl, 15_000, { 'User-Agent': BROWSER_UA });
-
-    if (!res.ok) throw new Error(`Watch page returned HTTP ${res.status}`);
-
-    const html = await res.text();
-    if (html.includes('class="g-recaptcha"')) {
-      throw new Error('YouTube returned a CAPTCHA challenge');
-    }
-
-    const playerResponse = this.extractJsonObject(html, 'ytInitialPlayerResponse');
-    if (!playerResponse) throw new Error('ytInitialPlayerResponse not found in watch page HTML');
-
-    const trackList = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-    if (!Array.isArray(trackList)) return [];
-
-    return trackList.map((t: Record<string, unknown>) => ({
-      baseUrl: (t.baseUrl as string) ?? '',
-      languageCode: (t.languageCode as string) ?? '',
-      kind: (t.kind as string) ?? '',
-    }));
-  }
-
-  private extractJsonObject(html: string, varName: string): any | null {
-    const startToken = `var ${varName} = `;
-    const startIndex = html.indexOf(startToken);
-    if (startIndex === -1) return null;
-
-    const jsonStart = startIndex + startToken.length;
-    let depth = 0;
-
-    for (let i = jsonStart; i < html.length; i++) {
-      if (html[i] === '{') depth++;
-      else if (html[i] === '}') {
-        depth--;
-        if (depth === 0) {
-          try {
-            return JSON.parse(html.slice(jsonStart, i + 1));
-          } catch {
-            return null;
-          }
-        }
-      }
-    }
-    return null;
-  }
-
-  private parseTranscriptXml(xml: string): CaptionLine[] {
-    const results: CaptionLine[] = [];
-
-    // srv3 format first: <p t="ms" d="ms">...<s>word</s>...</p>
-    const pRegex = /<p\s+t="(\d+)"\s+d="(\d+)"[^>]*>([\s\S]*?)<\/p>/g;
-    let match: RegExpExecArray | null;
-
-    while ((match = pRegex.exec(xml)) !== null) {
-      const startMs = parseInt(match[1], 10);
-      const durMs = parseInt(match[2], 10);
-      const inner = match[3];
-
-      let text = '';
-      const sRegex = /<s[^>]*>([^<]*)<\/s>/g;
-      let sMatch: RegExpExecArray | null;
-      while ((sMatch = sRegex.exec(inner)) !== null) {
-        text += sMatch[1];
-      }
-      if (!text) text = inner.replace(/<[^>]+>/g, '');
-
-      text = this.decodeEntities(text).replace(/\n/g, ' ').trim();
-      if (text) results.push({ startMs, endMs: startMs + durMs, text });
-    }
-
-    if (results.length > 0) return results;
-
-    // Classic format fallback
-    const textRegex = /<text start="([^"]*)" dur="([^"]*)">([^<]*)<\/text>/g;
-    while ((match = textRegex.exec(xml)) !== null) {
-      const startSec = parseFloat(match[1]);
-      const durSec = parseFloat(match[2]);
-      const startMs = Math.round(startSec * 1000);
-      const endMs = Math.round((startSec + durSec) * 1000);
-      const text = this.decodeEntities(match[3]).replace(/\n/g, ' ').trim();
-      if (text) results.push({ startMs, endMs, text });
-    }
-
-    return results;
-  }
-
-  private decodeEntities(text: string): string {
-    return text
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&apos;/g, "'")
-      .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
-      .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)));
   }
 
   // ── Data API search (port of getSuggestedVideos helpers) ────────────────────
@@ -306,7 +182,7 @@ export class YoutubeService {
     );
 
     const candidateIds = candidates.map((c) => c.id.videoId);
-    const audioLangMap = await this.fetchAudioLanguages(candidateIds);
+    const audioLangMap = await fetchAudioLanguages(candidateIds, this.apiKey);
 
     const languageFiltered = candidates.filter((item) => audioLangMap.get(item.id.videoId) === lang);
 
@@ -325,50 +201,10 @@ export class YoutubeService {
     }));
   }
 
-  private async fetchAudioLanguages(videoIds: string[]): Promise<Map<string, string>> {
-    if (videoIds.length === 0) return new Map();
-    if (!this.apiKey) return new Map();
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15_000);
-
-    let res: Response;
-    try {
-      res = await fetch(
-        `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoIds.join(',')}&key=${this.apiKey}`,
-        { signal: controller.signal },
-      );
-    } catch (err) {
-      clearTimeout(timer);
-      throw err;
-    }
-    clearTimeout(timer);
-
-    if (!res.ok) throw new Error(`YouTube videos API HTTP ${res.status}`);
-
-    const data = await res.json();
-    const langMap = new Map<string, string>();
-    for (const item of data.items ?? []) {
-      const audioLang: string | undefined =
-        item.snippet?.defaultAudioLanguage ?? item.snippet?.defaultLanguage;
-      if (audioLang) {
-        langMap.set(item.id, audioLang.split('-')[0].toLowerCase());
-      }
-    }
-    return langMap;
-  }
-
   // ── validateVideoUrl port ───────────────────────────────────────────────────
 
   static extractVideoId(url: string): string | null {
-    try {
-      const parsed = new URL(url);
-      if (parsed.hostname === 'youtu.be') return parsed.pathname.slice(1);
-      if (parsed.hostname.includes('youtube.com')) return parsed.searchParams.get('v');
-    } catch {
-      // not a URL
-    }
-    return null;
+    return extractVideoIdFromUrl(url);
   }
 
   async validateVideo(videoId: string, targetLang: string): Promise<{ valid: boolean; reason?: string }> {

@@ -1,12 +1,9 @@
-import { HttpException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.module';
 import { SpeechService } from '../speech/speech.service';
 import { UsersService } from '../users/users.service';
-
-function error(type: string, message: string, status: number): HttpException {
-  return new HttpException({ error: { type, message } }, status);
-}
+import { error } from '../utils/http-error.util';
 
 @Injectable()
 export class PronounceService {

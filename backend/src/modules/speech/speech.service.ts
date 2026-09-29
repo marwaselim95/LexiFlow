@@ -1,16 +1,13 @@
 import { Injectable } from '@nestjs/common';
 
+import { bucketScore } from './utils/score-bucket.util';
+import { LOCALE_MAP } from './utils/locale-map.util';
+
 // Port of supabase/functions/assessPronunciation — SpeechSuper client.
 
 export interface PhonemeStatus {
   phoneme: string;
   status: 'excellent' | 'good' | 'wrong';
-}
-
-function bucketScore(score: number): 'excellent' | 'good' | 'wrong' {
-  if (score >= 80) return 'excellent';
-  if (score >= 50) return 'good';
-  return 'wrong';
 }
 
 @Injectable()
@@ -37,14 +34,7 @@ export class SpeechService {
       throw new Error('AI_MISSING_KEY: SPEECHSUPER_API_KEY / SPEECHSUPER_APP_KEY are not configured');
     }
 
-    // Map ISO 639-1 codes to SpeechSuper locale codes.
-    const LOCALE_MAP: Record<string, string> = {
-      ar: 'ar-SA', zh: 'zh-CN', nl: 'nl-NL', en: 'en-US', fr: 'fr-FR', de: 'de-DE',
-      el: 'el-GR', he: 'he-IL', hi: 'hi-IN', id: 'id-ID', it: 'it-IT', ja: 'ja-JP',
-      ko: 'ko-KR', fa: 'fa-IR', pl: 'pl-PL', pt: 'pt-BR', ro: 'ro-RO', ru: 'ru-RU',
-      es: 'es-ES', sv: 'sv-SE', th: 'th-TH', tr: 'tr-TR', uk: 'uk-UA', vi: 'vi-VN',
-    };
-
+    // Prepare the payload for the SpeechSuper API request, including the app key, request details (core type, reference text, audio type, audio data, and language). The language is determined based on the target language provided, with a fallback to 'en-US' if the target language is not mapped in LOCALE_MAP.`
     const payload = {
       appKey: this.appKey,
       request: {
@@ -55,7 +45,8 @@ export class SpeechService {
         language: LOCALE_MAP[targetLang] ?? 'en-US',
       },
     };
-
+  
+    // Set up an AbortController to handle request timeouts. If the request takes longer than 30 seconds, it will be aborted to prevent hanging requests.
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 30_000);
 
@@ -78,6 +69,7 @@ export class SpeechService {
 
     if (!res.ok) throw new Error(`SpeechSuper HTTP ${res.status}`);
 
+    // Parse the JSON response from the SpeechSuper API.
     const data = await res.json();
 
     const rawPhonemes: Array<{ phoneme: string; score: number }> =

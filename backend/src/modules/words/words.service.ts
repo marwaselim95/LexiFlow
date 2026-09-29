@@ -1,13 +1,10 @@
-import { HttpException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.module';
 import { SrsService } from '../srs/srs.service';
 import { AiService } from '../ai/ai.service';
 import { UsersService } from '../users/users.service';
-
-function error(type: string, message: string, status: number): HttpException {
-  return new HttpException({ error: { type, message } }, status);
-}
+import { error } from '../utils/http-error.util';
 
 interface SaveWordInput {
   word: {

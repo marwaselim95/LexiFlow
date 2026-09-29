@@ -1,11 +1,8 @@
-import { HttpException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 
 import { AiService } from '../ai/ai.service';
+import { error } from '../utils/http-error.util';
 import { validateCardScripts } from '../utils/text-sanitize.util';
-
-function error(type: string, message: string, status: number): HttpException {
-  return new HttpException({ error: { type, message } }, status);
-}
 
 @Injectable()
 export class DetailCardService {
@@ -14,6 +11,9 @@ export class DetailCardService {
   // ── generateDetailCard ──────────────────────────────────────────────────────
 
   async generateDetailCard(input: { text: string; nativeLang: string; targetLang: string }) {
+    // Validate input fields and throw an error if any required field is missing.
+    // The input object should contain the text to analyze, the native language code, and the target language code.
+    // If any of these fields are missing, an HTTP error with status 400 (Bad Request) is thrown.
     const { text, nativeLang, targetLang } = input;
     if (!text || !nativeLang || !targetLang) {
       throw error('unknown', 'Missing required fields', 400);
@@ -62,6 +62,7 @@ Every field except the native-language synonyms line must be written entirely in
 Provide 1-3 context blocks based on how many distinct usage contexts the word has.
 Return ONLY valid JSON, no markdown fences.`;
 
+    // Call the AI service with the constructed prompt to generate a detailed vocabulary card based on the input text. The AI is expected to return a JSON response that includes the mode (either "simplified" or "full") and the corresponding card details.
     const raw = await this.ai.callGemini(prompt, { jsonMode: true });
     let parsed: { mode: string; card: Record<string, unknown> };
     try {
@@ -75,6 +76,7 @@ Return ONLY valid JSON, no markdown fences.`;
     // - rename nativeSynonyms → synonyms
     // - rename translation → nativeTranslation (simplified mode)
     if (parsed.card && typeof parsed.card === 'object') {
+      // If the AI response includes a card object, normalize its properties to match the expected frontend types. Specifically, rename the "nativeSynonyms" property to "synonyms" and the "translation" property to "nativeTranslation" for simplified mode. This ensures consistency in the data structure used by the frontend application.
       const card = parsed.card as Record<string, unknown>;
       if ('nativeSynonyms' in card) {
         card.synonyms = card.nativeSynonyms;
@@ -119,6 +121,7 @@ Return ONLY valid JSON in one of these two shapes (no markdown fences):
 - No typos: { "hasTypos": false }
 - Has typos: { "hasTypos": true, "suggestion": "<corrected text with only spelling fixed>" }`;
 
+    // Call the AI service with the constructed prompt to check for spelling mistakes and typos in the input text. The AI is expected to return a JSON response indicating whether typos were found and, if so, providing a corrected version of the text with only spelling errors fixed.
     const raw = await this.ai.callGemini(prompt, { jsonMode: true });
     try {
       return JSON.parse(raw);
@@ -145,6 +148,7 @@ Return a JSON object: { "translations": ["...", "...", ...] } with the same coun
 Input:
 ${JSON.stringify(explanations)}`;
 
+    // Call the AI service with the constructed prompt to translate the explanation strings into the native language. The AI is expected to return a JSON response with the translated strings in the same order as the input.
     const raw = await this.ai.callGemini(prompt, { jsonMode: true });
     const parsed = JSON.parse(raw);
     const translated = parsed.translations ?? parsed[Object.keys(parsed)[0]] ?? [];
