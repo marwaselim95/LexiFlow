@@ -1,7 +1,8 @@
 // Script-contamination detection for LLM-generated text.
 // Port of supabase/functions/_shared/textSanitize.ts (Deno test block omitted).
 
-export type ScriptName = 'arabic' | 'latin' | 'cjk' | 'cyrillic';
+import { ScriptName } from './types/script-name.type';
+import { ContaminationResult } from './types/contamination-result.interface';
 
 const SCRIPT_RANGES: Record<ScriptName, Array<[number, number]>> = {
   arabic: [
@@ -84,13 +85,7 @@ export function deriveExpectedScript(langName: string): ScriptName | null {
   return LANG_TO_SCRIPT[key] ?? null;
 }
 
-export interface ContaminationResult {
-  headwordContaminated: boolean;
-  filteredSynonyms: string[];
-  filteredContexts: Array<Record<string, unknown>>;
-  synonymsRemoved: number;
-  contextsRemoved: number;
-}
+
 
 function textIsContaminated(text: string, script: ScriptName): boolean {
   const words = String(text).split(/\s+/).filter(Boolean);

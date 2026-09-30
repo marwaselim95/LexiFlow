@@ -1,11 +1,6 @@
 // Transcript XML parsing (srv3 and classic formats) and HTML entity decoding.
 
-// Caption text (its start and its end and the content of the caption) in milliseconds and text.
-export interface CaptionLine {
-  startMs: number;
-  endMs: number;
-  text: string;
-}
+import { CaptionLine } from '../types/caption-line.interface';
 
 export function parseTranscriptXml(xml: string): CaptionLine[] {
   const results: CaptionLine[] = [];

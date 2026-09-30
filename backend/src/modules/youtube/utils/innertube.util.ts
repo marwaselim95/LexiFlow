@@ -1,6 +1,7 @@
 // Caption track discovery via InnerTube API and watch page scraping.
 
 import { fetchWithTimeout } from './fetch-with-timeout.util';
+import { CaptionTrack } from '../types/caption-track.interface';
 
 // InnerTube API (Android client) — primary caption source.
 export const INNERTUBE_API_URL = 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false'; // Youtube InnerTube API endpoint for fetching player data, including captions.
@@ -12,18 +13,20 @@ export const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36,gzip(gfe)';
 
-// A caption track represents a set of captions for a specific language.
-export interface CaptionTrack {
-  baseUrl: string;
-  languageCode: string;
-  kind: string; // "asr" for auto-generated, "" for manual
-}
-
-export async function fetchTracksViaInnerTube(): Promise<CaptionTrack[]> {
+export async function fetchTracksViaInnerTube(videoId: string): Promise<CaptionTrack[]> {
   const res = await fetchWithTimeout(INNERTUBE_API_URL, 10_000, {
     'Content-Type': 'application/json',
     'User-Agent': INNERTUBE_UA,
-  });
+  }, JSON.stringify({
+    context: {
+      client: {
+        clientName: 'ANDROID',
+        clientVersion: INNERTUBE_CLIENT_VERSION,
+        androidSdkVersion: 34,
+      },
+    },
+    videoId,
+  }));
 
   // If the response from the InnerTube API is not OK (i.e., the HTTP status code is not in the 200-299 range), return an empty array to indicate that no caption tracks were found.
   if (!res.ok) return [];

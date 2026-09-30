@@ -1,25 +1,19 @@
 import { Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.module';
+import { WordsModel } from './words.model';
 import { SrsService } from '../srs/srs.service';
 import { AiService } from '../ai/ai.service';
 import { UsersService } from '../users/users.service';
 import { error } from '../utils/http-error.util';
 
-interface SaveWordInput {
-  word: {
-    headword: string;
-    synonyms?: string[];
-    nativeSynonyms?: string[];
-    contexts: Array<{ label: string; explanation: string; example: string }>;
-  };
-  source: 'manual' | 'watch' | 'explore' | 'selection';
-}
+import { SaveWordInput } from './types/save-word-input.interface';
 
 @Injectable()
 export class WordsService {
   constructor(
     private prisma: PrismaService,
+    private wordsModel: WordsModel,
     private srs: SrsService,
     private ai: AiService,
     private users: UsersService,
@@ -40,32 +34,8 @@ export class WordsService {
     const targetLanguage = await this.users.getTargetLanguage(userId);
 
     const wordRow = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.word.create({
-        data: {
-          userId,
-          headword: word.headword,
-          nativeSynonyms,
-          targetLanguage,
-          stage: 1,
-          stage6Streak: 0,
-          active: true,
-          source: input.source,
-        },
-      });
-
-      await tx.wordContext.createMany({
-        data: word.contexts.map((c, i) => ({
-          wordId: created.id,
-          label: c.label,
-          explanation: c.explanation,
-          example: c.example,
-          sortOrder: i,
-        })),
-      });
-
-      // Schedule first review
+      const created = await this.wordsModel.createWordWithContexts(tx, userId, { headword: word.headword, nativeSynonyms, targetLanguage, source: input.source }, word.contexts);
       await this.srs.scheduleReview(tx, created.id);
-
       return created;
     });
 
@@ -78,7 +48,7 @@ export class WordsService {
     if (!wordId) throw error('unknown', 'wordId required', 400);
 
     // Ownership enforced via userId filter (replaces RLS)
-    await this.prisma.word.deleteMany({ where: { id: wordId, userId } });
+    await this.wordsModel.deleteWord(wordId, userId);
     return { success: true };
   }
 
@@ -87,11 +57,7 @@ export class WordsService {
   async getVaultMonths(userId: string): Promise<Array<{ month: string; wordCount: number }>> {
     const targetLanguage = await this.users.getTargetLanguage(userId);
 
-    const words = await this.prisma.word.findMany({
-      where: { userId, targetLanguage },
-      select: { savedAt: true },
-      orderBy: { savedAt: 'desc' },
-    });
+    const words = await this.wordsModel.getWordsForMonth(userId, targetLanguage, new Date('2000-01-01'), new Date('2100-01-01'));
 
     const monthMap = new Map<string, number>();
     for (const row of words) {
@@ -114,15 +80,7 @@ export class WordsService {
 
     const targetLanguage = await this.users.getTargetLanguage(userId);
 
-    const rows = await this.prisma.word.findMany({
-      where: {
-        userId,
-        targetLanguage,
-        savedAt: { gte: startDate, lt: endDate },
-      },
-      include: { contexts: { orderBy: { sortOrder: 'asc' } } },
-      orderBy: { savedAt: 'desc' },
-    });
+    const rows = await this.wordsModel.getWordsForMonthWithContexts(userId, targetLanguage, startDate, endDate);
 
     return rows.map((row) => ({
       id: row.id,
@@ -164,10 +122,7 @@ export class WordsService {
 
     const targetLanguage = await this.users.getTargetLanguage(userId);
 
-    const allWords = await this.prisma.word.findMany({
-      where: { userId, targetLanguage, savedAt: { gte: startDate, lt: endDate } },
-      select: { id: true, headword: true },
-    });
+    const allWords = await this.wordsModel.getWordsForMonth(userId, targetLanguage, startDate, endDate);
 
     let available = allWords.filter((w) => !excludeWordIds.includes(w.id));
 

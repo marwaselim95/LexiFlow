@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 
-import { PrismaService } from '../prisma/prisma.module';
+import { ExploreModel } from './explore.model';
 import { AiService } from '../ai/ai.service';
 import { UsersService } from '../users/users.service';
 import { error } from '../utils/http-error.util';
@@ -14,7 +14,7 @@ const OUTPUT_COUNT = 5;
 @Injectable()
 export class ExploreService {
   constructor(
-    private prisma: PrismaService,
+    private exploreModel: ExploreModel,
     private ai: AiService,
     private users: UsersService,
   ) {}
@@ -30,12 +30,7 @@ export class ExploreService {
     const targetLang = codeToName[targetCode] ?? targetCode;
     const nativeLang = codeToName[nativeCode] ?? nativeCode;
 
-    const vaultWords = await this.prisma.word.findMany({
-      where: { userId, targetLanguage: targetCode },
-      select: { id: true, headword: true },
-      orderBy: { savedAt: 'desc' },
-      take: SAMPLE_SIZE,
-    });
+    const vaultWords = await this.exploreModel.getVaultWords(userId, targetCode, SAMPLE_SIZE);
 
     if (vaultWords.length === 0) {
       return { emptyMessage: 'Save some words to start exploring!' };

@@ -30,7 +30,7 @@ function resolveProvider(): ProviderConfig {
   if (groqKey) {
     return {
       baseUrl: "https://api.groq.com/openai/v1",
-      model: "llama-3.3-70b-versatile",
+      model: "openai/gpt-oss-20b",
       apiKey: groqKey,
       name: "groq",
       errorPrefix: "GROQ",

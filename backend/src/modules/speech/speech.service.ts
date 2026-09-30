@@ -2,13 +2,9 @@ import { Injectable } from '@nestjs/common';
 
 import { bucketScore } from './utils/score-bucket.util';
 import { LOCALE_MAP } from './utils/locale-map.util';
+import { PhonemeStatus } from './types/phoneme-status.interface';
 
 // Port of supabase/functions/assessPronunciation — SpeechSuper client.
-
-export interface PhonemeStatus {
-  phoneme: string;
-  status: 'excellent' | 'good' | 'wrong';
-}
 
 @Injectable()
 export class SpeechService {

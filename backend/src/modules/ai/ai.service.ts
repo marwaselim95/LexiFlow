@@ -1,16 +1,8 @@
 import { Injectable } from '@nestjs/common';
+import { ProviderConfig } from './types/provider-config.interface';
 
 // Port of supabase/functions/_shared/gemini.ts.
 // Provider priority: GROQ_API_KEY → Groq, else GEMINI_API_KEY/OPEN_ROUTER → OpenRouter.
-
-interface ProviderConfig {
-  baseUrl: string;
-  model: string;
-  apiKey: string;
-  name: string;
-  errorPrefix: string;
-  extraHeaders?: Record<string, string>;
-}
 
 @Injectable()
 export class AiService {
@@ -19,7 +11,7 @@ export class AiService {
     if (groqKey) {
       return {
         baseUrl: 'https://api.groq.com/openai/v1',
-        model: 'llama-3.3-70b-versatile',
+        model: 'openai/gpt-oss-20b',
         apiKey: groqKey,
         name: 'groq',
         errorPrefix: 'GROQ',

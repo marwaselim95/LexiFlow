@@ -114,7 +114,7 @@ All AI and third-party integrations run server-side as Supabase Edge Functions (
 
 Shared utilities (`supabase/functions/_shared/`) handle CORS, error normalization, rate limiting, the AI provider client (Groq primary, OpenRouter fallback), Levenshtein-based typo tolerance, and script-contamination detection for AI output.
 
-AI provider: **Groq** (`llama-3.3-70b-versatile`) is primary; falls back to OpenRouter if configured. See `supabase/functions/_shared/gemini.ts` (name is legacy — no longer Gemini-specific).
+AI provider: **Groq** (`openai/gpt-oss-20b`) is primary; falls back to OpenRouter if configured. See `supabase/functions/_shared/gemini.ts` (name is legacy — no longer Gemini-specific).
 
 Full endpoint-by-endpoint behavior and tunable constants (rate limits, typo tolerance thresholds, cold-start thresholds, etc.) are documented in `THRESHOLDS.md`.
 

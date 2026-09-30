@@ -1,7 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, type PrismaClient } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.module';
+import { SrsModel } from './srs.model';
+import { Tx } from './types/tx.type';
 
 // Port of the Postgres RPCs schedule_review + on_answer
 // (supabase/migrations/003_rpc_functions.sql and 009_multi_language_support.sql).
@@ -16,15 +18,16 @@ const STAGE_DELAY_MS: Record<number, number> = {
   6: 61 * 24 * 60 * 60 * 1000, // 2 months (approx)
 };
 
-type Tx = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
-
 @Injectable()
 export class SrsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private srsModel: SrsModel,
+  ) {}
 
   /** Inserts one pending review_queue row for the word based on its current stage. */
   async scheduleReview(tx: Tx, wordId: string): Promise<void> {
-    const word = await tx.word.findUnique({ where: { id: wordId } });
+    const word = await this.srsModel.findWordById(tx, wordId);
     if (!word) throw new NotFoundException(`word not found: ${wordId}`);
 
     const delayMs = STAGE_DELAY_MS[word.stage] ?? STAGE_DELAY_MS[2];
@@ -32,15 +35,13 @@ export class SrsService {
     // Question type mirrors the stage number exactly
     const questionType = word.stage;
 
-    await tx.reviewQueue.create({
-      data: {
-        userId: word.userId,
-        wordId,
-        scheduledFor,
-        questionType,
-        status: 'pending',
-        targetLanguage: word.targetLanguage,
-      },
+    await this.srsModel.createReviewQueue(tx, {
+      userId: word.userId,
+      wordId,
+      scheduledFor,
+      questionType,
+      status: 'pending',
+      targetLanguage: word.targetLanguage,
     });
   }
 
@@ -60,10 +61,7 @@ export class SrsService {
     return this.prisma.$transaction(async (tx) => {
       // Lock the word row for the duration of the transaction
       // (equivalent of SELECT ... FOR UPDATE in the original RPC).
-      const lockRows = await tx.$queryRawUnsafe<Array<{ stage: number; stage6_streak: number; active: boolean; mastered_at: Date | null; user_id: string }>>(
-        'SELECT stage, stage6_streak, active, mastered_at, user_id FROM words WHERE id = $1::uuid FOR UPDATE',
-        wordId,
-      );
+      const lockRows = await this.srsModel.lockWordById(wordId);
       if (!lockRows || lockRows.length === 0) {
         throw new NotFoundException(`word not found: ${wordId}`);
       }
@@ -100,32 +98,27 @@ export class SrsService {
         }
       }
 
-      await tx.word.update({
-        where: { id: wordId },
-        data: {
-          stage: stageAfter,
-          stage6Streak: streak,
-          active,
-          masteredAt,
-        },
+      await this.srsModel.updateWord(tx, wordId, {
+        stage: stageAfter,
+        stage6Streak: streak,
+        active,
+        masteredAt,
       });
 
       // Mark queue item done and clear cached question so the next cycle
       // generates a fresh one (belt-and-suspenders from submitAnswer).
-      await tx.reviewQueue.updateMany({
-        where: { id: reviewId },
-        data: { status: 'completed', currentMcq: Prisma.DbNull },
+      await this.srsModel.updateReviewQueueMany(tx, reviewId, {
+        status: 'completed',
+        currentMcq: Prisma.DbNull,
       });
 
-      await tx.reviewHistory.create({
-        data: {
-          userId: locked.user_id,
-          wordId,
-          reviewId,
-          isCorrect,
-          stageBefore,
-          stageAfter,
-        },
+      await this.srsModel.createReviewHistory(tx, {
+        userId: locked.user_id,
+        wordId,
+        reviewId,
+        isCorrect,
+        stageBefore,
+        stageAfter,
       });
 
       // Schedule next review only if the word is still active

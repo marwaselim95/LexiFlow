@@ -1,12 +1,8 @@
 // Canonical category normalizer — port of supabase/functions/_shared/normalizeCategory.ts
 
-export const CANONICAL_CATEGORIES = [
-  'history', 'science', 'technology', 'business', 'health',
-  'self-development', 'travel', 'cooking', 'sports', 'entertainment',
-  'education', 'nature', 'art', 'philosophy', 'politics', 'other',
-] as const;
+import { CANONICAL_CATEGORIES, CanonicalCategory } from './types/canonical-category.type';
 
-export type CanonicalCategory = (typeof CANONICAL_CATEGORIES)[number];
+export { CANONICAL_CATEGORIES };
 
 const KEYWORD_MAP: Array<[CanonicalCategory, string[]]> = [
   ['history', [

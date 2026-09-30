@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
-import { PrismaService } from '../prisma/prisma.module';
+import { PronounceModel } from './pronounce.model';
 import { SpeechService } from '../speech/speech.service';
 import { UsersService } from '../users/users.service';
 import { error } from '../utils/http-error.util';
@@ -8,7 +8,7 @@ import { error } from '../utils/http-error.util';
 @Injectable()
 export class PronounceService {
   constructor(
-    private prisma: PrismaService,
+    private pronounceModel: PronounceModel,
     private speech: SpeechService,
     private users: UsersService,
   ) {}
@@ -18,15 +18,9 @@ export class PronounceService {
   async getPhonemeList(userId: string): Promise<Array<{ phoneme: string; status: 'excellent' | 'good' | 'wrong' }>> {
     const lang = await this.users.getTargetLanguage(userId).catch(() => 'en');
 
-    const refs = await this.prisma.phonemeReference.findMany({
-      where: { language: lang },
-      orderBy: { phoneme: 'asc' },
-    });
+    const refs = await this.pronounceModel.getPhonemeReferences(lang);
 
-    const assessments = await this.prisma.phonemeAssessment.findMany({
-      where: { userId, targetLanguage: lang },
-      select: { phoneme: true, status: true },
-    });
+    const assessments = await this.pronounceModel.getPhonemeAssessments(userId, lang);
 
     const assessMap = new Map(assessments.map((a) => [a.phoneme, a.status]));
 
@@ -47,10 +41,7 @@ export class PronounceService {
 
     const lang = await this.users.getTargetLanguage(userId).catch(() => 'en');
 
-    const row = await this.prisma.phonemeExampleWord.findUnique({
-      where: { language_phoneme: { language: lang, phoneme } },
-      select: { word: true },
-    });
+    const row = await this.pronounceModel.getPhonemeExampleWord(lang, phoneme);
 
     if (!row) throw error('unknown', 'No example word found for phoneme', 404);
 
@@ -76,23 +67,7 @@ export class PronounceService {
 
     // Upsert phoneme_assessments for each phoneme + increment attempts
     for (const ph of result.phonemeBreakdown) {
-      await this.prisma.phonemeAssessment.upsert({
-        where: {
-          userId_targetLanguage_phoneme: {
-            userId,
-            targetLanguage: targetLang,
-            phoneme: ph.phoneme,
-          },
-        },
-        update: { status: ph.status, lastAssessedAt: new Date(), attempts: { increment: 1 } },
-        create: {
-          userId,
-          targetLanguage: targetLang,
-          phoneme: ph.phoneme,
-          status: ph.status,
-          attempts: 1,
-        },
-      });
+      await this.pronounceModel.upsertPhonemeAssessment(userId, targetLang, ph.phoneme, ph.status);
     }
 
     return result;

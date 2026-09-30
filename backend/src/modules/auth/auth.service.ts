@@ -7,14 +7,14 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 
-import { PrismaService } from '../prisma/prisma.module';
 import { error } from '../utils/http-error.util';
+import { AuthModel } from './auth.model';
 import { SignUpDto, LoginDto } from './dto/login.dto';
 
 @Injectable()
 export class AuthService {
   constructor(
-    private prisma: PrismaService,
+    private authModel: AuthModel,
     private jwt: JwtService,
   ) {}
 
@@ -23,7 +23,7 @@ export class AuthService {
   }
 
   async signUp(dto: SignUpDto): Promise<{ userId: string; token: string }> {
-    const existing = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    const existing = await this.authModel.findUserByEmail(dto.email);
     if (existing) {
       throw error('email_taken', 'An account with this email already exists.', 409);
     }
@@ -32,26 +32,7 @@ export class AuthService {
 
     // Replaces the migration-010 DB trigger: create user + profile + first
     // learning language atomically at signup time.
-    const user = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.user.create({
-        data: { email: dto.email, passwordHash },
-      });
-
-      await tx.profile.create({
-        data: {
-          id: created.id,
-          nativeLanguage: 'en',
-          targetLanguage: 'en',
-          onboarded: false,
-        },
-      });
-
-      await tx.userLanguage.create({
-        data: { userId: created.id, language: 'en' },
-      });
-
-      return created;
-    }).catch((e) => {
+    const user = await this.authModel.createUserWithProfile(dto.email, passwordHash).catch((e) => {
       if (String(e?.code) === 'P2002') {
         throw error('email_taken', 'An account with this email already exists.', 409);
       }
@@ -63,7 +44,7 @@ export class AuthService {
   }
 
   async login(dto: LoginDto): Promise<{ userId: string; email: string; token: string }> {
-    const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    const user = await this.authModel.findUserByEmail(dto.email);
     const valid = user
       ? await bcrypt.compare(dto.password, user.passwordHash)
       : false;
@@ -77,14 +58,14 @@ export class AuthService {
   }
 
   async getMe(userId: string): Promise<{ id: string; email: string }> {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    const user = await this.authModel.findUserById(userId);
     if (!user) throw new UnauthorizedException();
     return { id: user.id, email: user.email };
   }
 
   async requestPasswordReset(input: { email: string }): Promise<{ success: true }> {
     // Never reveal whether the email exists.
-    const user = await this.prisma.user.findUnique({ where: { email: input.email } });
+    const user = await this.authModel.findUserByEmail(input.email);
     if (!user) return { success: true };
 
     const token = await this.jwt.signAsync(
@@ -141,11 +122,11 @@ export class AuthService {
       throw error('weak_password', 'Password must be at least 6 characters long.', 400);
     }
 
-    const exists = await this.prisma.user.findUnique({ where: { id: payload.sub } });
+    const exists = await this.authModel.findUserById(payload.sub);
     if (!exists) throw new BadRequestException();
 
     const passwordHash = await bcrypt.hash(input.newPassword, 10);
-    await this.prisma.user.update({ where: { id: payload.sub }, data: { passwordHash } });
+    await this.authModel.updateUserPassword(payload.sub, passwordHash);
 
     return { success: true };
   }

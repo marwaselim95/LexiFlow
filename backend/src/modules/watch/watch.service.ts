@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
-import { PrismaService } from '../prisma/prisma.module';
+import { WatchModel } from './watch.model';
 import { YoutubeService } from '../youtube/youtube.service';
 import { UsersService } from '../users/users.service';
 import { error } from '../utils/http-error.util';
@@ -13,7 +13,7 @@ const EXPLORE_RATIO = 0.2;
 @Injectable()
 export class WatchService {
   constructor(
-    private prisma: PrismaService,
+    private watchModel: WatchModel,
     private youtube: YoutubeService,
     private users: UsersService,
   ) {}
@@ -56,11 +56,7 @@ export class WatchService {
 
     // ── PASSIVE / PERSONALIZED FEED PATH ──
     // If the query is not present, the service will fetch the user's watch history from the database. If the user has watched fewer than 5 videos, a prompt message will be returned to encourage the user to search for topics they love. Otherwise, the service will analyze the user's watch history to determine their top categories and generate a personalized query based on those categories. The personalized query will be used to search for videos on YouTube, and the results will be merged with exploration videos from fresh categories to provide a diverse set of recommendations. The final list of videos will be returned to the user.
-    const history = await this.prisma.watchHistory.findMany({
-      where: { userId },
-      orderBy: { watchedAt: 'desc' },
-      select: { videoId: true, categories: true },
-    });
+    const history = await this.watchModel.getWatchHistory(userId);
 
     if (history.length < COLD_START_THRESHOLD) {
       return { promptMessage: 'Search for topics you love to start getting recommendations!' };
@@ -135,9 +131,7 @@ export class WatchService {
   async recordWatchHistory(userId: string, videoId: string, categories: string[] = []): Promise<{ success: true }> {
     if (!videoId) throw error('unknown', 'videoId required', 400);
     // Normalize categories to canonical form and filter out any invalid categories.
-    await this.prisma.watchHistory.create({
-      data: { userId, videoId, categories },
-    });
+    await this.watchModel.createWatchHistory(userId, videoId, categories);
     return { success: true };
   }
 }

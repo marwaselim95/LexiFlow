@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
-import { PrismaService } from '../prisma/prisma.module';
+import { MasteryModel } from './mastery.model';
 import { SrsService } from '../srs/srs.service';
 import { AiService } from '../ai/ai.service';
 import { UsersService } from '../users/users.service';
@@ -9,18 +9,12 @@ import { isTypoTolerantMatch } from '../utils/levenshtein.util';
 
 const DAILY_REVIEW_CAP = 50;
 
-interface WordWithCtx {
-  id: string;
-  headword: string;
-  nativeSynonyms: string[];
-  stage: number;
-  contexts: Array<{ label: string; explanation: string; example: string }>;
-}
+import { WordWithCtx } from './types/word-with-ctx.interface';
 
 @Injectable()
 export class MasteryService {
   constructor(
-    private prisma: PrismaService,
+    private masteryModel: MasteryModel,
     private srs: SrsService,
     private ai: AiService,
     private users: UsersService,
@@ -31,31 +25,12 @@ export class MasteryService {
   async getSession(userId: string): Promise<{ queue: any[]; totalToday: number }> {
     const activeLanguage = await this.users.getTargetLanguage(userId);
 
-    const queueRows = await this.prisma.reviewQueue.findMany({
-      where: {
-        userId,
-        targetLanguage: activeLanguage,
-        status: 'pending',
-        scheduledFor: { lte: new Date() },
-      },
-      orderBy: { scheduledFor: 'asc' },
-      take: DAILY_REVIEW_CAP,
-      select: { id: true, wordId: true, questionType: true, scheduledFor: true, currentMcq: true },
-    });
+    const queueRows = await this.masteryModel.getReviewQueue(userId, activeLanguage, DAILY_REVIEW_CAP);
 
     if (queueRows.length === 0) return { queue: [], totalToday: 0 };
 
     const wordIds = [...new Set(queueRows.map((r) => r.wordId))];
-    const words = await this.prisma.word.findMany({
-      where: { id: { in: wordIds } },
-      select: {
-        id: true,
-        headword: true,
-        nativeSynonyms: true,
-        stage: true,
-        contexts: { select: { label: true, explanation: true, example: true } },
-      },
-    });
+    const words = await this.masteryModel.getWordsByIds(wordIds);
 
     const wordMap = new Map(words.map((w) => [w.id, w]));
 
@@ -75,7 +50,6 @@ export class MasteryService {
             questionContent = await this.generateQuestion(word, questionType);
           } catch {
             if (questionType >= 3) {
-              // For audio/production types, fall back to MCQ
               questionType = questionType % 2 === 0 ? 2 : 1;
               try {
                 questionContent = await this.generateQuestion(word, questionType);
@@ -90,10 +64,7 @@ export class MasteryService {
           // Save to cache (best-effort; never blocks the response)
           if (questionContent && !(questionContent as Record<string, unknown>).fallback) {
             try {
-              await this.prisma.reviewQueue.update({
-                where: { id: item.id },
-                data: { currentMcq: questionContent as any },
-              });
+              await this.masteryModel.updateReviewQueueMcq(item.id, questionContent);
             } catch (cacheEx) {
               console.error('[getMasterySession] Exception caching MCQ for review', item.id, cacheEx);
             }
@@ -149,9 +120,6 @@ export class MasteryService {
         flat.reversedDefinition = qc.question;
         flat.reversedOptions = opts;
         flat.correctOption = opts && idx !== undefined ? opts[idx] : undefined;
-      } else if (questionType === 3) {
-        // audio type — frontend uses TTS with the headword; leave audioUrl undefined
-        flat.audioUrl = undefined;
       } else if (questionType === 4) {
         flat.fillSentence = qc.sentence;
       } else if (questionType === 5) {
@@ -213,9 +181,6 @@ Instructions:
 - Do not use any of these words as distractors since they are synonyms and would also be correct: ${word.nativeSynonyms.join(', ')}.
 - Make the distractors plausible (real words from the same language/domain) but clearly different in meaning.
 Return JSON: { "question": string, "options": string[], "correctIndex": number }`,
-
-      3: `Generate a listen-and-write prompt for the word "${word.headword}". The user will hear the word and must type it.
-Return JSON: { "instruction": "Listen and type the word you hear", "answer": "${word.headword}" }`,
 
       4: `Generate a fill-in-the-blanks sentence for the word "${word.headword}" using one of these examples: ${word.contexts.map((c) => c.example).join(' / ')}.
 Replace the word with _____.
@@ -283,17 +248,14 @@ Return JSON: { "instruction": string, "word": "${word.headword}" }`,
     }
 
     // Ownership check (replaces RLS): the word must belong to the caller
-    const word = await this.prisma.word.findFirst({
-      where: { id: wordId, userId },
-      include: { contexts: { select: { label: true, explanation: true } } },
-    });
+    const word = await this.masteryModel.findWordByIdAndUserId(wordId, userId);
     if (!word) throw error('unknown', 'Word not found', 404);
 
     let isCorrect = false;
 
     if (questionType === 1 || questionType === 2) {
       isCorrect = userAnswer === 'true' || userAnswer === true;
-    } else if (questionType === 3 || questionType === 4) {
+    } else if (questionType === 4) {
       isCorrect = isTypoTolerantMatch(word.headword, String(userAnswer));
     } else if (questionType === 5) {
       // Nuanced Usage — LLM-graded

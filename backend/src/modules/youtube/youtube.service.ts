@@ -1,11 +1,14 @@
 import { Injectable } from '@nestjs/common';
 
-import { PrismaService } from '../prisma/prisma.module';
 import { normalizeCategory } from '../utils/normalize-category.util';
+import { YoutubeModel } from './youtube.model';
 import { fetchWithTimeout } from './utils/fetch-with-timeout.util';
-import { BROWSER_UA, CaptionTrack, fetchTracksViaInnerTube, INNERTUBE_UA, scrapeTracksFromWatchPage } from './utils/innertube.util';
-import { CaptionLine, parseTranscriptXml } from './utils/transcript-parser.util';
+import { BROWSER_UA, fetchTracksViaInnerTube, INNERTUBE_UA, scrapeTracksFromWatchPage } from './utils/innertube.util';
+import { parseTranscriptXml } from './utils/transcript-parser.util';
+import { CaptionTrack } from './types/caption-track.interface';
+import { CaptionLine } from './types/caption-line.interface';
 import { extractVideoId as extractVideoIdFromUrl, fetchAudioLanguages } from './utils/video-api.util';
+import { Candidate } from './types/candidate.type';
 
 // Port of supabase/functions/getVideoCaptions + the YouTube Data API logic
 // from getSuggestedVideos / validateVideoUrl.
@@ -15,7 +18,7 @@ const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 @Injectable()
 export class YoutubeService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private youtubeModel: YoutubeModel) {}
 
   private get apiKey(): string {
     return process.env.YOUTUBE_API_KEY ?? '';
@@ -25,9 +28,7 @@ export class YoutubeService {
 
   async getVideoCaptions(videoId: string, lang: string): Promise<{ captions: CaptionLine[] }> {
     // Cache check
-    const cached = await this.prisma.videoCaption.findUnique({
-      where: { videoId_language: { videoId, language: lang } },
-    });
+    const cached = await this.youtubeModel.findVideoCaption(videoId, lang);
     // If the cached captions exist and are still valid (not expired), return them.
     if (cached) {
       // Check if the cached captions are still valid based on the defined TTL (time-to-live).
@@ -46,7 +47,7 @@ export class YoutubeService {
     let source: string; // Variable to indicate the source of the caption tracks (either "innertube" or "watchpage").
     try {
       // First, attempt to fetch caption tracks using the InnerTube API. If that fails or returns no tracks, fall back to scraping the watch page for caption tracks.
-      const innerTubeResult = await fetchTracksViaInnerTube();
+      const innerTubeResult = await fetchTracksViaInnerTube(videoId);
 
       // If InnerTube API returns caption tracks, use them; otherwise, scrape the watch page for caption tracks.
       if (innerTubeResult && innerTubeResult.length > 0) {
@@ -123,11 +124,7 @@ export class YoutubeService {
     // Step 4: write cache (non-fatal on failure)
     try {
       // Upsert the fetched captions into the database cache. If the upsert operation fails, log an error but do not throw an exception, allowing the function to return the fetched captions even if caching fails.
-      await this.prisma.videoCaption.upsert({
-        where: { videoId_language: { videoId, language: lang } }, // The unique constraint for the upsert operation is based on the combination of videoId and language. This ensures that each video-language pair has a single entry in the cache.
-        update: { captions: captions as any, fetchedAt: new Date() }, // If an entry already exists for the video-language pair, update the captions and the fetchedAt timestamp to reflect the new data.
-        create: { videoId, language: lang, captions: captions as any }, // If no entry exists for the video-language pair, create a new entry with the provided videoId, language, and captions.
-      });
+      await this.youtubeModel.upsertVideoCaption(videoId, lang, captions);
       console.log(`[CAPTION_CACHE_WRITE] video=${videoId} lang=${lang} lines=${captions.length}`);
     } catch (err) {
       console.error(`[CAPTION_CACHE_WRITE_FAILED] video=${videoId} error=${(err as Error).message}`);
@@ -167,15 +164,6 @@ export class YoutubeService {
     if (!res.ok) throw new Error(`YouTube API HTTP ${res.status}`);
 
     const data = await res.json();
-
-    type Candidate = {
-      id: { videoId: string };
-      snippet: {
-        title: string;
-        thumbnails: { high?: { url: string }; medium?: { url: string }; default?: { url: string } };
-        channelTitle: string;
-      };
-    };
 
     const candidates: Candidate[] = (data.items ?? []).filter(
       (item: { id: { videoId: string } }) => !watchedIds.has(item.id.videoId),
